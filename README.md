@@ -1,4 +1,4 @@
-# Sentinel — Public Health Intelligence Platform
+# Public Pulse — Public Health Intelligence Platform
 
 > Epidemiological intelligence for pandemic decision-making, powered entirely by Snowflake.
 
@@ -80,7 +80,7 @@ Transforms raw COVID-19 case, death, and vaccination data into actionable intell
 
 3. **Deploy Dashboard**
    - Snowsight → Projects → Streamlit → + Streamlit App
-   - Name: `Sentinel`
+   - Name: `Public Pulse`
    - Database: `PUBLIC_HEALTH_DB`
    - Schema: `ANALYTICS`
    - Warehouse: `SYSTEM$STREAMLIT_NOTEBOOK_WH`

@@ -1,5 +1,5 @@
 """
-Sentinel — COVID-19 Insights for Everyone
+Public Pulse — COVID-19 Insights for Everyone
 Streamlit in Snowflake (SiS) Application
 Packages needed: plotly
 Python: 3.10
@@ -25,7 +25,7 @@ def to_date(s):
     return pd.Timestamp(s).date()
 
 # ── Page Config ──────────────────────────────────────────────
-st.set_page_config(page_title="Sentinel", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Public Pulse", page_icon="◆", layout="wide")
 
 # ── Design System ────────────────────────────────────────────
 MAROON = "#800020"
@@ -217,11 +217,11 @@ def chat_respond(user_message, country_row, country_name, score):
     # Build recent conversation history (last 6 messages)
     history = ""
     for msg in st.session_state.chat_messages[-6:]:
-        role_label = "User" if msg['role'] == 'user' else "Sentinel"
+        role_label = "User" if msg['role'] == 'user' else "Public Pulse"
         history += f"{role_label}: {msg['content']}\n"
 
     system = (
-        "You are Sentinel, a COVID-19 data assistant. "
+        "You are Public Pulse, a COVID-19 data assistant. "
         "You are an expert analyst but you explain everything in simple, plain English for everyday people.\n\n"
         "STRICT RULES:\n"
         "1. ONLY answer questions about COVID-19 data, epidemiology, and public health.\n"
@@ -255,7 +255,7 @@ def chat_respond(user_message, country_row, country_name, score):
             result_str = query_result.to_string(index=False, max_rows=20)
 
             step2_prompt = (
-                f"You are Sentinel, a COVID-19 data assistant for everyday people.\n\n"
+                f"You are Public Pulse, a COVID-19 data assistant for everyday people.\n\n"
                 f"The user asked: {user_message}\n\n"
                 f"You queried the database and got these results:\n{result_str}\n\n"
                 f"Current context: viewing {country_name} ({country_row.RISK_TIER} risk, score {score}/100)\n\n"
@@ -282,7 +282,7 @@ with st.sidebar:
     st.markdown("""
     <div style="padding: 12px 0 8px 0;">
         <div style="font-family: 'Playfair Display', serif; font-size: 1.5rem; font-weight: 700;">
-            Sentinel
+            Public Pulse
         </div>
         <div style="font-size: .8rem; opacity: .7; margin-top: 2px;">
             Epidemiological Intelligence
@@ -328,7 +328,7 @@ with st.sidebar:
 # ── Header ───────────────────────────────────────────────────
 c1, c2 = st.columns([3, 1])
 with c1:
-    st.markdown('<div class="dash-title">Sentinel</div>', True)
+    st.markdown('<div class="dash-title">Public Pulse</div>', True)
     st.markdown(f'<div class="dash-subtitle">Epidemiological Intelligence Dashboard — '
                 f'{len(countries)} Countries</div>', True)
 with c2:
@@ -600,9 +600,9 @@ with tabs[2]:
 
 # ═══════════ TAB 4: CHAT ═════════════════════════════════════
 with tabs[3]:
-    st.markdown(f'<div class="sec-hdr">Ask Sentinel — {sel_country}</div>', True)
+    st.markdown(f'<div class="sec-hdr">Ask Public Pulse — {sel_country}</div>', True)
     st.caption(
-        f"Ask any COVID-19 question. Sentinel queries the database and explains the numbers "
+        f"Ask any COVID-19 question. Public Pulse queries the database and explains the numbers "
         f"in simple English. Currently viewing **{sel_country}** ({cr.RISK_TIER} risk, score {score_val}/100)."
     )
 
@@ -627,7 +627,7 @@ with tabs[3]:
     if not st.session_state.chat_messages:
         with st.chat_message("assistant"):
             st.markdown(
-                f"Hi! I’m **Sentinel**, your COVID-19 data assistant. "
+                f"Hi! I’m **Public Pulse**, your COVID-19 data assistant. "
                 f"I can answer questions about case trends, risk levels, forecasts, "
                 f"and anomalies for **{sel_country}** or any other country. "
                 f"Ask me anything and I’ll explain the numbers in plain English!"
@@ -792,7 +792,7 @@ Every country has an identical validation window for fair MAPE comparison.
 | Preventive Measures | mistral-large | Risk level + epidemic phase + forecast + model confidence |
 | Policy Simulation | mistral-large | ML predictions + historical peaks + risk factors |
 | Compare Countries | mistral-large (live) | Risk tiers + Rt + forecast trends for selected countries |
-| Sentinel Chatbot | mistral-large (live) | 2-step: SQL generation + plain English explanation |
+| Public Pulse Chatbot | mistral-large (live) | 2-step: SQL generation + plain English explanation |
 
 ### Risk Scoring (8 Factors — All Absolute Thresholds)
 | Factor | Max Pts | Threshold |
@@ -825,5 +825,5 @@ Every claim references specific numbers the user can verify in the dashboard:
 
 
 # ── Footer ───────────────────────────────────────────────────
-st.markdown(f'<div class="footer">Sentinel — COVID-19 Insights for Everyone | '
+st.markdown(f'<div class="footer">Public Pulse — COVID-19 Insights for Everyone | '
             f'Snowflake ML + Cortex | For research purposes only</div>', True)

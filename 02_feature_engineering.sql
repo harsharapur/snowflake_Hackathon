@@ -1,5 +1,5 @@
 -- ============================================================================
--- SENTINEL — PUBLIC HEALTH INTELLIGENCE PLATFORM
+-- PUBLIC PULSE — PUBLIC HEALTH INTELLIGENCE PLATFORM
 -- FILE 2 OF 4: FEATURE ENGINEERING (25+ FEATURES)
 -- ============================================================================
 -- Run after 01_setup_and_ingestion.sql

@@ -1,5 +1,5 @@
 -- ============================================================================
--- SENTINEL — PUBLIC HEALTH INTELLIGENCE PLATFORM
+-- PUBLIC PULSE — PUBLIC HEALTH INTELLIGENCE PLATFORM
 -- FILE 4 OF 4: RISK TIERS + CORTEX AI NARRATIVES
 -- ============================================================================
 -- Run after 03_ml_models.sql

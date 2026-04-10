@@ -1,5 +1,5 @@
 -- ============================================================================
--- SENTINEL — PUBLIC HEALTH INTELLIGENCE PLATFORM
+-- PUBLIC PULSE — PUBLIC HEALTH INTELLIGENCE PLATFORM
 -- FILE 3 OF 4: ML MODELS (FORECAST + ANOMALY DETECTION)
 -- ============================================================================
 -- Run after 02_feature_engineering.sql
