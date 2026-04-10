@@ -238,17 +238,76 @@ TABLE_SCHEMAS = """Available tables (ONLY generate SELECT queries):
    One row per country with ALL combined metrics, forecasts, risk, anomalies."""
 
 def build_screen_context(country_row, country_name, score):
-    """Build rich context about what the user is currently viewing."""
-    parts = [
-        f"Dashboard is showing data for: {country_name}",
-        f"Risk tier: {country_row.RISK_TIER} (score {score}/100)",
-        f"Rt (reproduction number): {safe_val(country_row, 'RT_EFFECTIVE')}",
-        f"7-day avg cases: {safe_val(country_row, 'ROLLING_AVG_7D_CASES', '{:,.0f}')}",
-        f"Epidemic phase: {getattr(country_row, 'EPIDEMIC_PHASE', 'unknown')}",
-        f"Trend: {getattr(country_row, 'TREND_DIRECTION', 'unknown')}",
-        f"Forecast trend: {safe_val(country_row, 'FORECAST_TREND_PCT', '{:.1f}')}%",
-    ]
-    return "\n".join(parts)
+    """Build rich context describing what the user sees on the dashboard."""
+    rt_v = safe_val(country_row, 'RT_EFFECTIVE')
+    cases_v = safe_val(country_row, 'ROLLING_AVG_7D_CASES', '{:,.0f}')
+    phase_v = getattr(country_row, 'EPIDEMIC_PHASE', 'unknown')
+    trend_v = getattr(country_row, 'TREND_DIRECTION', 'unknown')
+    fcast_v = safe_val(country_row, 'FORECAST_TREND_PCT', '{:.1f}')
+    cfr_v = safe_val(country_row, 'CASE_FATALITY_RATE', '{:.2f}')
+    tier = country_row.RISK_TIER
+
+    return f"""=== DASHBOARD: Sentinel — COVID-19 Insights for Everyone ===
+The user is viewing a COVID-19 intelligence dashboard tracking {len(countries)} countries.
+Currently selected country: {country_name}
+
+SIDEBAR (always visible):
+- Country selector: {country_name} selected
+- Risk card: {tier} risk, score {score}/100
+
+HEADER: Shows "{country_name}" with a {tier} risk badge.
+
+TAB 1 — OVERVIEW (Global Risk):
+- KPI cards: {len(risk[risk.RISK_TIER == 'HIGH'])} HIGH risk countries, {len(risk[risk.RISK_TIER == 'MODERATE'])} MODERATE, {len(risk[risk.RISK_TIER == 'LOW'])} LOW
+- Average Rt across all countries: {risk.RT_EFFECTIVE.dropna().mean():.2f}
+- Average risk score: {risk.RISK_SCORE.mean():.0f}/100
+- Bar chart: risk scores for all countries (sorted highest to lowest)
+- Map: color-coded by risk tier (red=HIGH, amber=MODERATE, green=LOW)
+- Global risk table with all countries
+
+TAB 2 — EPIDEMIOLOGY (for {country_name}):
+- KPI cards: Rt={rt_v}, 7d avg cases={cases_v}, Phase={phase_v}, CFR={cfr_v}%
+- Chart: 7-day rolling average cases over time (Jan 2020 – Mar 2023)
+- Chart: Rt (reproduction number) over time with threshold line at 1.0
+- Chart: Daily deaths rolling average
+
+TAB 3 — FORECAST (for {country_name}):
+- ML forecast chart: 30-day prediction with 95% confidence interval (shaded band)
+- Historical actual cases vs predicted (model training on 2020–2022, validation 2022–2023)
+- Forecast trend: {fcast_v}% change over 30 days
+- Model performance table: MAPE and MAE per country
+
+TAB 4 — INTELLIGENCE (for {country_name}):
+- Quick Summary: AI-generated overview paragraph
+- What Do These Numbers Mean?: AI explains each metric with analogies
+- What's the Situation?: 4-paragraph deep-dive analysis
+- What Can I Do to Stay Safe?: 5 data-driven safety recommendations
+- Compare Countries: user selects multiple countries for AI comparison
+- What Could Happen Next?: 3 scenario simulations (status quo, new variant, intervention)
+- Anomaly Explanations: AI explains detected unusual data patterns
+
+TAB 5 — COMPARISON:
+- Side-by-side charts for multiple countries (case trends, Rt)
+- Comparison table with risk scores
+
+TAB 6 — ANOMALIES (for {country_name}):
+- Chart: actual vs expected cases with anomaly flags
+- List of detected anomalies with deviation percentages
+- Top anomalies table
+
+TAB 7 — METHODOLOGY:
+- Data sources, ML model details, risk scoring formula, AI grounding strategy
+
+CURRENT DATA FOR {country_name.upper()}:
+- Risk: {tier} ({score}/100)
+- Rt: {rt_v} (each infected person spreads to this many others)
+- 7-day avg cases: {cases_v}/day
+- Epidemic phase: {phase_v}
+- Trend direction: {trend_v}
+- Forecast trend: {fcast_v}% over next 30 days
+- Case fatality rate: {cfr_v}%
+- Risk breakdown: Rt={safe_val(country_row, 'F1_RT', '{:.0f}')}/25, Forecast={safe_val(country_row, 'F2_FORECAST', '{:.0f}')}/20, Accel={safe_val(country_row, 'F3_ACCEL', '{:.0f}')}/15, Doubling={safe_val(country_row, 'F4_DOUBLING', '{:.0f}')}/15, WoW={safe_val(country_row, 'F5_WOW', '{:.0f}')}/10, CFR={safe_val(country_row, 'F6_CFR', '{:.0f}')}/10, Volume={safe_val(country_row, 'F7_VOLUME', '{:.0f}')}/5, Anomaly={safe_val(country_row, 'F8_ANOMALY', '{:.0f}')}/5"""
+
 
 def extract_sql(response_text):
     """Extract SQL query from Cortex response if present. Returns None if no query."""
