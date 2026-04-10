@@ -1,5 +1,5 @@
 -- ============================================================================
--- SENTINEL — PUBLIC HEALTH INTELLIGENCE PLATFORM
+-- PUBLIC PULSE — PUBLIC HEALTH INTELLIGENCE PLATFORM
 -- FILE 1 OF 4: SETUP & DATA INGESTION
 -- ============================================================================
 -- Run this in a Snowflake SQL Worksheet (highlight all → Ctrl+Enter)

@@ -1,5 +1,5 @@
 """
-Sentinel — Public Health Intelligence Dashboard
+Public Pulse — COVID-19 Insights for Everyone
 Streamlit in Snowflake (SiS) Application
 Packages needed: plotly
 Python: 3.10
@@ -25,7 +25,7 @@ def to_date(s):
     return pd.Timestamp(s).date()
 
 # ── Page Config ──────────────────────────────────────────────
-st.set_page_config(page_title="Sentinel", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Public Pulse", page_icon="◆", layout="wide")
 
 # ── Design System ────────────────────────────────────────────
 MAROON = "#800020"
@@ -95,21 +95,6 @@ def load_all():
         if 'DATE' in df.columns:
             df['DATE'] = pd.to_datetime(df['DATE'])
 
-    # Narratives — may not exist yet
-    try:
-        narratives = query("SELECT * FROM PUBLIC_HEALTH_DB.ANALYTICS.CORTEX_NARRATIVES ORDER BY COUNTRY_REGION")
-    except Exception:
-        narratives = pd.DataFrame()
-    try:
-        anomaly_expl = query("SELECT * FROM PUBLIC_HEALTH_DB.ANALYTICS.ANOMALY_EXPLANATIONS ORDER BY COUNTRY_REGION, DATE")
-        if 'DATE' in anomaly_expl.columns:
-            anomaly_expl['DATE'] = pd.to_datetime(anomaly_expl['DATE'])
-    except Exception:
-        anomaly_expl = pd.DataFrame()
-    try:
-        global_triage = query("SELECT GLOBAL_BRIEF FROM PUBLIC_HEALTH_DB.ANALYTICS.GLOBAL_TRIAGE")
-    except Exception:
-        global_triage = pd.DataFrame()
     try:
         vaccinations = query("SELECT * FROM PUBLIC_HEALTH_DB.RAW.VACCINATIONS ORDER BY COUNTRY_REGION, DATE")
         if 'DATE' in vaccinations.columns and not vaccinations.empty:
@@ -123,9 +108,7 @@ def load_all():
 
     return {
         'risk': risk, 'features': features, 'hf': hf, 'forecast': forecast,
-        'anomalies': anomalies, 'narratives': narratives,
-        'anomaly_expl': anomaly_expl, 'global_triage': global_triage,
-        'vaccinations': vaccinations, 'metrics': metrics_df
+        'anomalies': anomalies, 'vaccinations': vaccinations, 'metrics': metrics_df
     }
 
 data = load_all()
@@ -134,9 +117,6 @@ features = data['features']
 hf = data['hf']
 forecast = data['forecast']
 anomalies = data['anomalies']
-narratives = data['narratives']
-anomaly_expl = data['anomaly_expl']
-global_triage = data['global_triage']
 vaccinations = data['vaccinations']
 metrics_df = data['metrics']
 
@@ -170,12 +150,139 @@ def safe_val(series, col, fmt="{:.2f}", default="—"):
     return fmt.format(v)
 
 
+# ── Chatbot Engine ────────────────────────────────────────────
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = []
+
+TABLE_SCHEMAS = """Available tables (ONLY generate SELECT queries):
+1. PUBLIC_HEALTH_DB.FEATURES.COVID_FEATURES
+   Columns: COUNTRY_REGION, DATE, DAILY_NEW_CASES, CUMULATIVE_CONFIRMED, CUMULATIVE_DEATHS,
+   ROLLING_AVG_7D_CASES, ROLLING_AVG_14D_CASES, ROLLING_AVG_7D_DEATHS,
+   RT_EFFECTIVE, DOUBLING_TIME_DAYS, CASE_FATALITY_RATE, ACCELERATION,
+   WOW_CHANGE_PCT, EPIDEMIC_PHASE, TREND_DIRECTION, ENDEMIC_FLAG
+
+2. PUBLIC_HEALTH_DB.ANALYTICS.RISK_TIERS
+   Columns: COUNTRY_REGION, RISK_TIER, RISK_SCORE, RT_EFFECTIVE,
+   ROLLING_AVG_7D_CASES, FORECAST_TREND_PCT,
+   F1_RT, F2_FORECAST, F3_ACCEL, F4_DOUBLING, F5_WOW, F6_CFR, F7_VOLUME, F8_ANOMALY
+
+3. PUBLIC_HEALTH_DB.ML.FORECASTS
+   Columns: COUNTRY_REGION, DATE, FORECASTED_CASES, FORECAST_LOWER, FORECAST_UPPER
+
+4. PUBLIC_HEALTH_DB.ML.ANOMALIES
+   Columns: COUNTRY_REGION, DATE, DAILY_NEW_CASES, EXPECTED, DEVIATION_PCT,
+   IS_ANOMALY (BOOLEAN), ANOMALY_DIRECTION
+
+5. PUBLIC_HEALTH_DB.ML.FORECAST_METRICS
+   Columns: SERIES (=country name), METRIC ('MAPE'/'MAE'), VALUE
+
+6. PUBLIC_HEALTH_DB.ANALYTICS.VW_CORTEX_CONTEXT
+   One row per country with ALL combined metrics, forecasts, risk, anomalies."""
+
+def build_data_context(country_row, country_name, score):
+    """Build concise data context for the selected country."""
+    return (
+        f"Selected country: {country_name}\n"
+        f"Risk tier: {country_row.RISK_TIER} (score {score}/100)\n"
+        f"Rt: {safe_val(country_row, 'RT_EFFECTIVE')} | "
+        f"7d avg cases: {safe_val(country_row, 'ROLLING_AVG_7D_CASES', '{:,.0f}')} | "
+        f"Forecast trend: {safe_val(country_row, 'FORECAST_TREND_PCT', '{:.1f}')}% | "
+        f"CFR: {safe_val(country_row, 'CASE_FATALITY_RATE', '{:.2f}')}%\n"
+        f"Total countries tracked: {len(countries)}"
+    )
+
+
+def extract_sql(response_text):
+    """Extract SQL query from Cortex response if present. Returns None if no query."""
+    text = str(response_text)
+    if '```sql' in text:
+        sql = text.split('```sql')[1].split('```')[0].strip()
+    elif '```' in text and 'SELECT' in text.upper():
+        sql = text.split('```')[1].split('```')[0].strip()
+    else:
+        return None
+    upper = sql.upper().strip()
+    forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE',
+                 'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE', 'EXEC']
+    if not upper.startswith('SELECT'):
+        return None
+    if any(kw in upper for kw in forbidden):
+        return None
+    return sql
+
+def chat_respond(user_message, country_row, country_name, score):
+    """Process user message through 2-step Cortex pipeline."""
+    data_ctx = build_data_context(country_row, country_name, score)
+
+    # Build recent conversation history (last 6 messages)
+    history = ""
+    for msg in st.session_state.chat_messages[-6:]:
+        role_label = "User" if msg['role'] == 'user' else "Public Pulse"
+        history += f"{role_label}: {msg['content']}\n"
+
+    system = (
+        "You are Public Pulse, a COVID-19 data assistant. "
+        "You are an expert analyst but you explain everything in simple, plain English for everyday people.\n\n"
+        "STRICT RULES:\n"
+        "1. ONLY answer questions about COVID-19 data, epidemiology, and public health.\n"
+        "2. If asked about ANYTHING else, politely say: "
+        "'I can only help with COVID-19 related questions. Try asking about case trends, risk levels, or forecasts!'\n"
+        "3. NEVER generate INSERT, UPDATE, DELETE, DROP, or any modifying SQL.\n"
+        "4. If you need to look up data, write a single SELECT query wrapped in ```sql ... ```\n"
+        "5. If you can answer from the data context without a query, just answer directly.\n"
+        "6. Always cite specific numbers. Explain what they mean in simple terms — "
+        "use analogies and plain language so anyone can understand.\n"
+        "7. Keep answers concise — under 150 words unless the user asks for detail.\n\n"
+        f"{TABLE_SCHEMAS}\n\n"
+        f"CURRENT DATA CONTEXT:\n{data_ctx}\n\n"
+        f"CONVERSATION HISTORY:\n{history}\n"
+    )
+
+    step1_prompt = f"{system}User question: {user_message}"
+
+    try:
+        response = session.sql(
+            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${step1_prompt}$$)"
+        ).collect()[0][0]
+    except Exception as e:
+        return f"Sorry, I had trouble processing that. Please try again. ({str(e)[:80]})"
+
+    sql_query = extract_sql(response)
+
+    if sql_query:
+        try:
+            query_result = session.sql(sql_query).to_pandas()
+            result_str = query_result.to_string(index=False, max_rows=20)
+
+            step2_prompt = (
+                f"You are Public Pulse, a COVID-19 data assistant for everyday people.\n\n"
+                f"The user asked: {user_message}\n\n"
+                f"You queried the database and got these results:\n{result_str}\n\n"
+                f"Current context: viewing {country_name} ({country_row.RISK_TIER} risk, score {score}/100)\n\n"
+                f"Explain the results in simple, plain English anyone can understand. "
+                f"Reference the specific numbers. Be concise (under 150 words). "
+                f"If the results are empty, say so and suggest what to ask instead."
+            )
+            explanation = session.sql(
+                f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${step2_prompt}$$)"
+            ).collect()[0][0]
+            return str(explanation)
+        except Exception as e:
+            # Query failed — fall back to the raw response without SQL
+            clean = str(response)
+            if '```' in clean:
+                clean = clean.split('```')[0].strip()
+            return clean if clean else f"Could you rephrase? I had trouble looking that up. ({str(e)[:60]})"
+    else:
+        return str(response)
+
+
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
     <div style="padding: 12px 0 8px 0;">
         <div style="font-family: 'Playfair Display', serif; font-size: 1.5rem; font-weight: 700;">
-            Sentinel
+            Public Pulse
         </div>
         <div style="font-size: .8rem; opacity: .7; margin-top: 2px;">
             Epidemiological Intelligence
@@ -221,7 +328,7 @@ with st.sidebar:
 # ── Header ───────────────────────────────────────────────────
 c1, c2 = st.columns([3, 1])
 with c1:
-    st.markdown('<div class="dash-title">Sentinel</div>', True)
+    st.markdown('<div class="dash-title">Public Pulse</div>', True)
     st.markdown(f'<div class="dash-subtitle">Epidemiological Intelligence Dashboard — '
                 f'{len(countries)} Countries</div>', True)
 with c2:
@@ -232,7 +339,7 @@ with c2:
 
 
 # ── Tabs ─────────────────────────────────────────────────────
-tabs = st.tabs(["Overview", "Epidemiology", "Forecast", "Intelligence",
+tabs = st.tabs(["Overview", "Epidemiology", "Forecast", "Chat",
                 "Comparison", "Anomalies", "Methodology"])
 
 
@@ -491,76 +598,69 @@ with tabs[2]:
             st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
 
-# ═══════════ TAB 4: INTELLIGENCE ═════════════════════════════
+# ═══════════ TAB 4: CHAT ═════════════════════════════════════
 with tabs[3]:
-    st.markdown(f'<div class="sec-hdr">Intelligence Briefing — {sel_country}</div>', True)
+    st.markdown(f'<div class="sec-hdr">Ask Public Pulse — {sel_country}</div>', True)
+    st.caption(
+        f"Ask any COVID-19 question. Public Pulse queries the database and explains the numbers "
+        f"in simple English. Currently viewing **{sel_country}** ({cr.RISK_TIER} risk, score {score_val}/100)."
+    )
 
-    # Global triage
-    if not global_triage.empty:
-        with st.expander("Global Situation Summary", expanded=False):
-            st.markdown(str(global_triage.iloc[0].GLOBAL_BRIEF))
-
-    # Country health brief
-    if not narratives.empty:
-        narr = narratives[narratives.COUNTRY_REGION == sel_country]
-        if not narr.empty:
-            n = narr.iloc[0]
-            st.markdown(f'{tier_badge(n.RISK_TIER)} &nbsp; Score: {n.RISK_SCORE}/100', True)
-            st.markdown("#### AI Health Brief")
-            st.info(str(n.HEALTH_BRIEF))
-    else:
-        st.info("Cortex narratives not generated yet. Run 04_risk_and_cortex.sql.")
-
-    # Anomaly explanations
-    if not anomaly_expl.empty:
-        anom_e = anomaly_expl[anomaly_expl.COUNTRY_REGION == sel_country]
-        if 'DEVIATION_PCT' in anom_e.columns:
-            anom_e = anom_e.sort_values('DEVIATION_PCT', ascending=False, key=abs)
-        if not anom_e.empty:
-            st.markdown('<div class="sub-hdr">Anomaly Explanations</div>', True)
-            for idx, ae in anom_e.iterrows():
-                date_str = str(ae.DATE.date()) if hasattr(ae.DATE, 'date') else str(ae.DATE)
-                with st.expander(f"{date_str} — {ae.ANOMALY_DIRECTION} ({ae.DEVIATION_PCT:+.0f}%)"):
-                    st.markdown(f"**Actual**: {ae.ACTUAL:,.0f} | **Expected**: {ae.EXPECTED:,.0f}")
-                    st.markdown(str(ae.EXPLANATION))
-
-    # Live Q&A
-    st.markdown('<div class="sub-hdr">Ask Cortex</div>', True)
-    suggestions = [
-        "Compare to Europe?",
-        "Travel restrictions?",
-        "Press conference summary?",
+    # Suggested quick questions
+    sugg_questions = [
+        "Explain my country’s risk score",
+        "What does the forecast predict?",
+        "What does Rt mean for me?",
+        "Any unusual patterns detected?",
+        "How is the world doing overall?",
+        "What should I do to stay safe?",
     ]
-    cols = st.columns(len(suggestions))
-    for i, q in enumerate(suggestions):
-        if cols[i].button(q, key=f"sugg_{i}"):
-            st.session_state["prefill_q"] = q
+    sugg_cols = st.columns(3)
+    for i, sq in enumerate(sugg_questions):
+        if sugg_cols[i % 3].button(sq, key=f"chat_sq_{i}"):
+            st.session_state.chat_pending = sq
+            st.rerun()
 
-    user_q = st.text_input("Your question:", value=st.session_state.get("prefill_q", ""))
+    st.markdown("---")
 
-    if st.button("Ask Cortex") and user_q:
-        rt_v = safe_val(cr, 'RT_EFFECTIVE')
-        cases_v = safe_val(cr, 'ROLLING_AVG_7D_CASES', "{:,.0f}")
-        prompt = f"""You are a public health analyst. COVID-19 data for {sel_country}:
-7-day avg cases: {cases_v}. Rt: {rt_v}.
-Risk: {cr.RISK_TIER} ({score_val}/100). Phase: {cr.EPIDEMIC_PHASE}.
-Answer in under 4 sentences for a non-technical official. Question: {user_q}"""
+    # Display chat history
+    if not st.session_state.chat_messages:
+        with st.chat_message("assistant"):
+            st.markdown(
+                f"Hi! I’m **Public Pulse**, your COVID-19 data assistant. "
+                f"I can answer questions about case trends, risk levels, forecasts, "
+                f"and anomalies for **{sel_country}** or any other country. "
+                f"Ask me anything and I’ll explain the numbers in plain English!"
+            )
+    else:
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-        try:
-            with st.spinner("Cortex is thinking..."):
-                result = session.sql(
-                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-70b', $${prompt}$$)"
-                ).collect()[0][0]
-            st.info(str(result))
-        except Exception as e:
-            st.error(f"Cortex error: {e}")
+    # Chat input
+    chat_input = st.chat_input("Ask me anything about COVID-19 data...")
 
-    # All country summaries
-    if not narratives.empty:
-        st.markdown('<div class="sub-hdr">All Country Briefs</div>', True)
-        for idx, n in narratives.iterrows():
-            with st.expander(f"{n.COUNTRY_REGION} — {n.RISK_TIER} ({n.RISK_SCORE}/100)"):
-                st.markdown(str(n.HEALTH_BRIEF))
+    # Process pending suggestion or typed input
+    pending = st.session_state.pop("chat_pending", None)
+    if chat_input:
+        pending = chat_input
+
+    if pending:
+        st.session_state.chat_messages.append({"role": "user", "content": pending})
+        with st.chat_message("user"):
+            st.markdown(pending)
+        with st.chat_message("assistant"):
+            with st.spinner("Looking up the data..."):
+                response = chat_respond(pending, cr, sel_country, score_val)
+            st.markdown(response)
+        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+        st.rerun()
+
+    # Clear chat button
+    if st.session_state.chat_messages:
+        if st.button("Clear chat", key="chat_clear"):
+            st.session_state.chat_messages = []
+            st.rerun()
 
 
 # ═══════════ TAB 5: COMPARISON ═══════════════════════════════
@@ -669,6 +769,9 @@ Johns Hopkins University CSSE COVID-19 Dataset via Snowflake Marketplace (Starsc
 | `JHU_COVID_19` | JHU CSSE | Case and death time-series |
 | `GOOG_GLOBAL_MOBILITY_REPORT` | Google | Mobility index (risk factor) |
 | `OWID_VACCINATIONS` | OWID | Vaccination coverage |
+| `VW_CORTEX_CONTEXT` | Pipeline View | One-row-per-country context for AI grounding |
+| `CORTEX_NARRATIVES` | Cortex AI | 4-column AI intelligence per country |
+| `POLICY_SIMULATIONS` | Cortex AI | 3-scenario what-if analysis per country |
 
 ### Machine Learning
 | Model | Engine | Train Period | Confidence |
@@ -680,6 +783,16 @@ Johns Hopkins University CSSE COVID-19 Dataset via Snowflake Marketplace (Starsc
 ### Train/Test Split
 **Fixed calendar split**: Train on Jan 2020 – Mar 31, 2022. Validate on Apr 2022 – Mar 2023.
 Every country has an identical validation window for fair MAPE comparison.
+
+### AI Intelligence (Cortex)
+| Narrative | Model | Grounding |
+|-----------|-------|-----------|
+| Metric Explainer | mistral-large | All 25+ features + 8-factor risk breakdown + ML forecast trajectory + MAPE |
+| Situation Summary | mistral-large | Current data + forecast + anomalies + historical wave context |
+| Preventive Measures | mistral-large | Risk level + epidemic phase + forecast + model confidence |
+| Policy Simulation | mistral-large | ML predictions + historical peaks + risk factors |
+| Compare Countries | mistral-large (live) | Risk tiers + Rt + forecast trends for selected countries |
+| Public Pulse Chatbot | mistral-large (live) | 2-step: SQL generation + plain English explanation |
 
 ### Risk Scoring (8 Factors — All Absolute Thresholds)
 | Factor | Max Pts | Threshold |
@@ -693,6 +806,15 @@ Every country has an identical validation window for fair MAPE comparison.
 | Case volume | 5 | >50K/day → 5, >10K → 2 |
 | Recent anomaly | 5 | Anomaly in last 7 days → 5 |
 
+### AI Grounding Strategy
+All AI narratives are grounded in **actual pipeline data** — not external documents.
+Every claim references specific numbers the user can verify in the dashboard:
+- Epidemiological indicators from `COVID_FEATURES`
+- 8-factor risk breakdown from `RISK_TIERS`
+- 30-day forecast trajectory + MAPE from `FORECASTS` / `FORECAST_METRICS`
+- Anomaly detection stats from `ANOMALIES`
+- Historical wave peaks from computed analysis
+
 ### Fairness
 - **Africa bias**: Nigeria/South Africa have highest null rates — flagged explicitly
 - **Vaccination gap**: OWID data loaded where available; absence documented
@@ -703,5 +825,5 @@ Every country has an identical validation window for fair MAPE comparison.
 
 
 # ── Footer ───────────────────────────────────────────────────
-st.markdown(f'<div class="footer">Sentinel — Epidemiological Intelligence | '
+st.markdown(f'<div class="footer">Public Pulse — COVID-19 Insights for Everyone | '
             f'Snowflake ML + Cortex | For research purposes only</div>', True)

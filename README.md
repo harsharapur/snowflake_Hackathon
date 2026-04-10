@@ -1,59 +1,54 @@
-# Sentinel — Public Health Intelligence Platform
+# Public Pulse — Public Health Intelligence Platform
 
-> Epidemiological intelligence for pandemic decision-making, powered entirely by Snowflake.
+> Epidemiological intelligence for pandemic decision-making, powered entirely by Snowflake ML and Cortex.
+
+## Demo
+**Demo Link:** [Insert Link Here]()
 
 ## What It Does
 
-Transforms raw COVID-19 case, death, and vaccination data into actionable intelligence:
-- **30-day forecasts** with statistically derived confidence intervals
-- **Anomaly detection** (spike vs. drop classification)
-- **Risk classification** (8-factor composite scoring)
-- **AI-generated health briefs** via Snowflake Cortex
-- **Live Q&A** — ask Cortex any question about any country
+Public Pulse transforms raw COVID-19 case, death, and vaccination data into actionable, data-grounded intelligence for everyday people:
+- **Dynamic Text-to-SQL AI Chatbot:** Ask any COVID-19 question in plain English. The AI automatically queries the database using `mistral-large` and explains the ML outputs using analogies and accessible language.
+- **30-day Forecasts:** Machine learning predictions with statistically derived 95% confidence intervals.
+- **Anomaly Detection:** Identifies statistical outliers (spikes/drops in cases) and flags them for review.
+- **Risk Classification:** Comprehensive 8-factor composite scoring (Rt, acceleration, growth trajectories, etc.).
+- **Explainable AI:** Provides continuous, dynamic context about what the user is currently viewing to ensure accurate explanations.
 
 ## Architecture
 
+Public Pulse uses a 100% Snowflake-native architecture without needing any external processing.
+
+```mermaid
+flowchart TD
+    subgraph Snowflake Marketplace
+        JHU(JHU_COVID_19)
+        Vax(OWID_VACCINATIONS)
+        Mob(GOOG_MOBILITY)
+    end
+
+    subgraph Data Pipeline
+        Ingest[01 - Data Ingestion & Joins]
+        FeatEng[02 - Feature Engineering\nRt, CFR, Doubling Time]
+        ML[03 - Snowflake ML Models\nFORECAST & ANOMALY_DETECTION]
+        Risk[04 - Risk Scoring\n8-Factor Composite]
+    end
+
+    subgraph User Interface (Streamlit in Snowflake)
+        Dash[Interactive Dashboards\nEpidemiology, Forecast, Anomalies]
+        Chat[Dynamic AI Chatbot\n2-Step Text-to-SQL]
+    end
+
+    JHU --> Ingest
+    Vax --> Ingest
+    Mob --> Ingest
+    Ingest --> FeatEng
+    FeatEng --> ML
+    ML --> Risk
+    Risk --> Dash
+    Dash <-->|Query Gen + Explanations| Chat
 ```
-┌──────────────────────────────────────────────┐
-│  Snowflake Marketplace (Starschema)          │
-│  JHU_COVID_19 │ GOOG_MOBILITY │ OWID_VAX    │
-└──────────────────┬───────────────────────────┘
-                   │
-    ┌──────────────▼──────────────┐
-    │  01 Ingestion (SQL)         │
-    │  15 countries, daily deltas │
-    │  Cases + deaths + vax       │
-    └──────────────┬──────────────┘
-                   │
-    ┌──────────────▼──────────────┐
-    │  02 Feature Engineering     │
-    │  25+ features: Rt, phase,   │
-    │  doubling time, CFR,        │
-    │  acceleration, SNR          │
-    └──────────────┬──────────────┘
-                   │
-    ┌──────────────▼──────────────┐
-    │  03 ML Models               │
-    │  SNOWFLAKE.ML.FORECAST      │
-    │  SNOWFLAKE.ML.ANOMALY_DET   │
-    │  Fixed calendar split       │
-    │  Native 95% CI              │
-    └──────────────┬──────────────┘
-                   │
-    ┌──────────────▼──────────────┐
-    │  04 Risk + Cortex           │
-    │  8-factor risk (0-100)      │
-    │  CORTEX.COMPLETE narratives │
-    │  Anomaly explanations       │
-    └──────────────┬──────────────┘
-                   │
-    ┌──────────────▼──────────────┐
-    │  05 Streamlit in Snowflake  │
-    │  7 interactive tabs         │
-    │  Maroon/white design        │
-    │  Live Cortex Q&A            │
-    └─────────────────────────────┘
-```
+
+**Chatbot Architecture:** The Chat tab uses a 2-step Cortex pipeline. When a user asks a question, the agent (1) writes a safe `SELECT` statement against the epidemiological/ML tables, executes it, and (2) re-reads the output to explain the raw numbers in plain English.
 
 ## Setup Instructions
 
@@ -76,16 +71,16 @@ Transforms raw COVID-19 case, death, and vaccination data into actionable intell
    | 1 | `01_setup_and_ingestion.sql` | ~3 min | Creates DB, loads data from 3 tables |
    | 2 | `02_feature_engineering.sql` | ~3 min | Computes 25+ epidemiological features |
    | 3 | `03_ml_models.sql` | ~15-20 min | Trains FORECAST + ANOMALY_DETECTION |
-   | 4 | `04_risk_and_cortex.sql` | ~5 min | Risk scores + Cortex AI narratives |
+   | 4 | `04_risk_and_cortex.sql` | ~2 min | Evaluates the 8-factor risk scores |
 
-3. **Deploy Dashboard**
+3. **Deploy Dashboard and AI Chatbot**
    - Snowsight → Projects → Streamlit → + Streamlit App
-   - Name: `Sentinel`
+   - Name: `Public Pulse`
    - Database: `PUBLIC_HEALTH_DB`
    - Schema: `ANALYTICS`
    - Warehouse: `SYSTEM$STREAMLIT_NOTEBOOK_WH`
    - Paste contents of `05_streamlit_app.py` → Run
-   - Add `plotly` via the Packages button (top right)
+   - Add **`plotly`** via the Packages button (top right)
 
 ## Data Sources
 
@@ -113,7 +108,7 @@ All from a single Marketplace listing — no external downloads.
 |------------|--------|
 | Snowflake Marketplace data only | ✅ Starschema COVID-19 |
 | All ML in Snowflake | ✅ SNOWFLAKE.ML.FORECAST + ANOMALY_DETECTION |
-| Cortex only (no external LLMs) | ✅ CORTEX.COMPLETE('llama3.1-70b') |
+| Cortex only (no external LLMs) | ✅ 2-step Text-to-SQL logic using `CORTEX.COMPLETE('mistral-large')` |
 | Streamlit in Snowflake | ✅ SiS deployment |
 | 10+ countries | ✅ 15 countries, 6 WHO regions |
 | Fairness documentation | ✅ Methodology tab |
