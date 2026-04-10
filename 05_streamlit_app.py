@@ -78,6 +78,36 @@ section[data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.15); }}
     padding: 3px 12px; border-radius: 4px; font-weight: 600; font-size: .85rem; }}
 .footer {{ text-align: center; color: {GRAY_500}; font-size: .8rem;
     padding: 1.5rem 0 .5rem 0; border-top: 1px solid {GRAY_100}; margin-top: 2rem; }}
+/* ── Floating Chatbot ── */
+.chat-fab {{ position: fixed; bottom: 24px; right: 24px; width: 60px; height: 60px;
+    border-radius: 50%; background: {MAROON}; color: {WHITE}; display: flex;
+    align-items: center; justify-content: center; font-size: 28px;
+    box-shadow: 0 4px 16px rgba(128,0,32,.3); z-index: 9999;
+    text-decoration: none; transition: transform .2s, box-shadow .2s; cursor: pointer; border: none; }}
+.chat-fab:hover {{ transform: scale(1.1); box-shadow: 0 6px 24px rgba(128,0,32,.45); }}
+.chat-panel {{ position: fixed; bottom: 96px; right: 24px; width: 440px;
+    max-height: 520px; background: {WHITE}; border-radius: 16px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.15); border: 1px solid {GRAY_100};
+    z-index: 9998; overflow: hidden; display: flex; flex-direction: column; }}
+.chat-header {{ background: {MAROON}; color: {WHITE}; padding: 14px 18px;
+    font-weight: 700; font-size: 1rem; display: flex; justify-content: space-between;
+    align-items: center; }}
+.chat-header small {{ font-weight: 400; font-size: .75rem; opacity: .7; }}
+.chat-body {{ flex: 1; overflow-y: auto; padding: 16px; max-height: 340px; }}
+.chat-msg {{ margin-bottom: 12px; line-height: 1.5; }}
+.chat-msg.user {{ text-align: right; }}
+.chat-msg.user .bubble {{ display: inline-block; background: {MAROON}; color: {WHITE};
+    padding: 8px 14px; border-radius: 14px 14px 2px 14px; max-width: 85%; text-align: left;
+    font-size: .9rem; }}
+.chat-msg.bot .bubble {{ display: inline-block; background: {GRAY_100}; color: {GRAY_900};
+    padding: 8px 14px; border-radius: 14px 14px 14px 2px; max-width: 85%; text-align: left;
+    font-size: .9rem; }}
+.chat-suggestions {{ padding: 8px 16px 4px; display: flex; flex-wrap: wrap; gap: 6px;
+    border-top: 1px solid {GRAY_100}; }}
+.chat-sugg-btn {{ background: none; border: 1px solid {GRAY_300}; border-radius: 20px;
+    padding: 4px 12px; font-size: .78rem; color: {GRAY_700}; cursor: pointer;
+    transition: all .15s; }}
+.chat-sugg-btn:hover {{ background: {MAROON}; color: {WHITE}; border-color: {MAROON}; }}
 </style>""", unsafe_allow_html=True)
 
 
@@ -174,6 +204,134 @@ def safe_val(series, col, fmt="{:.2f}", default="—"):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return default
     return fmt.format(v)
+
+
+# ── Chatbot Engine ────────────────────────────────────────────
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = []
+if 'chat_open' not in st.session_state:
+    st.session_state.chat_open = False
+
+TABLE_SCHEMAS = """Available tables (ONLY generate SELECT queries):
+1. PUBLIC_HEALTH_DB.FEATURES.COVID_FEATURES
+   Columns: COUNTRY_REGION, DATE, DAILY_NEW_CASES, CUMULATIVE_CONFIRMED, CUMULATIVE_DEATHS,
+   ROLLING_AVG_7D_CASES, ROLLING_AVG_14D_CASES, ROLLING_AVG_7D_DEATHS,
+   RT_EFFECTIVE, DOUBLING_TIME_DAYS, CASE_FATALITY_RATE, ACCELERATION,
+   WOW_CHANGE_PCT, EPIDEMIC_PHASE, TREND_DIRECTION, ENDEMIC_FLAG
+
+2. PUBLIC_HEALTH_DB.ANALYTICS.RISK_TIERS
+   Columns: COUNTRY_REGION, RISK_TIER, RISK_SCORE, RT_EFFECTIVE,
+   ROLLING_AVG_7D_CASES, FORECAST_TREND_PCT,
+   F1_RT, F2_FORECAST, F3_ACCEL, F4_DOUBLING, F5_WOW, F6_CFR, F7_VOLUME, F8_ANOMALY
+
+3. PUBLIC_HEALTH_DB.ML.FORECASTS
+   Columns: COUNTRY_REGION, DATE, FORECASTED_CASES, FORECAST_LOWER, FORECAST_UPPER
+
+4. PUBLIC_HEALTH_DB.ML.ANOMALIES
+   Columns: COUNTRY_REGION, DATE, DAILY_NEW_CASES, EXPECTED, DEVIATION_PCT,
+   IS_ANOMALY (BOOLEAN), ANOMALY_DIRECTION
+
+5. PUBLIC_HEALTH_DB.ML.FORECAST_METRICS
+   Columns: SERIES (=country name), METRIC ('MAPE'/'MAE'), VALUE
+
+6. PUBLIC_HEALTH_DB.ANALYTICS.VW_CORTEX_CONTEXT
+   One row per country with ALL combined metrics, forecasts, risk, anomalies."""
+
+def build_screen_context(country_row, country_name, score):
+    """Build rich context about what the user is currently viewing."""
+    parts = [
+        f"Dashboard is showing data for: {country_name}",
+        f"Risk tier: {country_row.RISK_TIER} (score {score}/100)",
+        f"Rt (reproduction number): {safe_val(country_row, 'RT_EFFECTIVE')}",
+        f"7-day avg cases: {safe_val(country_row, 'ROLLING_AVG_7D_CASES', '{:,.0f}')}",
+        f"Epidemic phase: {getattr(country_row, 'EPIDEMIC_PHASE', 'unknown')}",
+        f"Trend: {getattr(country_row, 'TREND_DIRECTION', 'unknown')}",
+        f"Forecast trend: {safe_val(country_row, 'FORECAST_TREND_PCT', '{:.1f}')}%",
+    ]
+    return "\n".join(parts)
+
+def extract_sql(response_text):
+    """Extract SQL query from Cortex response if present. Returns None if no query."""
+    text = str(response_text)
+    if '```sql' in text:
+        sql = text.split('```sql')[1].split('```')[0].strip()
+    elif '```' in text and 'SELECT' in text.upper():
+        sql = text.split('```')[1].split('```')[0].strip()
+    else:
+        return None
+    upper = sql.upper().strip()
+    forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE',
+                 'TRUNCATE', 'MERGE', 'GRANT', 'REVOKE', 'EXEC']
+    if not upper.startswith('SELECT'):
+        return None
+    if any(kw in upper for kw in forbidden):
+        return None
+    return sql
+
+def chat_respond(user_message, country_row, country_name, score):
+    """Process user message through 2-step Cortex pipeline."""
+    screen_ctx = build_screen_context(country_row, country_name, score)
+
+    # Build recent conversation history (last 6 messages)
+    history = ""
+    for msg in st.session_state.chat_messages[-6:]:
+        role_label = "User" if msg['role'] == 'user' else "Sentinel"
+        history += f"{role_label}: {msg['content']}\n"
+
+    system = (
+        "You are Sentinel, a COVID-19 data assistant built into an epidemiological dashboard. "
+        "You are an expert analyst but you write for everyday people with no medical background.\n\n"
+        "STRICT RULES:\n"
+        "1. ONLY answer questions about COVID-19 data, epidemiology, public health, and what the dashboard shows.\n"
+        "2. If asked about ANYTHING else (weather, sports, coding, recipes, politics, etc.), politely say: "
+        "'I can only help with COVID-19 related questions. Try asking about case trends, risk levels, or forecasts!'\n"
+        "3. NEVER generate INSERT, UPDATE, DELETE, DROP, or any modifying SQL.\n"
+        "4. If you need to look up data, write a single SELECT query wrapped in ```sql ... ```\n"
+        "5. If you can answer from the screen context without a query, just answer directly.\n"
+        "6. Always cite specific numbers. Explain what they mean in simple terms.\n"
+        "7. Keep answers concise — under 150 words unless the user asks for detail.\n\n"
+        f"{TABLE_SCHEMAS}\n\n"
+        f"CURRENT SCREEN CONTEXT:\n{screen_ctx}\n\n"
+        f"CONVERSATION HISTORY:\n{history}\n"
+    )
+
+    step1_prompt = f"{system}User question: {user_message}"
+
+    try:
+        response = session.sql(
+            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${step1_prompt}$$)"
+        ).collect()[0][0]
+    except Exception as e:
+        return f"Sorry, I had trouble processing that. Please try again. ({str(e)[:80]})"
+
+    sql_query = extract_sql(response)
+
+    if sql_query:
+        try:
+            query_result = session.sql(sql_query).to_pandas()
+            result_str = query_result.to_string(index=False, max_rows=20)
+
+            step2_prompt = (
+                f"You are Sentinel, a COVID-19 data assistant for everyday people.\n\n"
+                f"The user asked: {user_message}\n\n"
+                f"You queried the database and got these results:\n{result_str}\n\n"
+                f"Current context: viewing {country_name} ({country_row.RISK_TIER} risk, score {score}/100)\n\n"
+                f"Explain the results in simple, plain English anyone can understand. "
+                f"Reference the specific numbers. Be concise (under 150 words). "
+                f"If the results are empty, say so and suggest what to ask instead."
+            )
+            explanation = session.sql(
+                f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${step2_prompt}$$)"
+            ).collect()[0][0]
+            return str(explanation)
+        except Exception as e:
+            # Query failed — fall back to the raw response without SQL
+            clean = str(response)
+            if '```' in clean:
+                clean = clean.split('```')[0].strip()
+            return clean if clean else f"Could you rephrase? I had trouble looking that up. ({str(e)[:60]})"
+    else:
+        return str(response)
 
 
 # ── Sidebar ──────────────────────────────────────────────────
@@ -611,45 +769,6 @@ Under 400 words. No bullet points."""
                     st.markdown(f"**Actual**: {ae.ACTUAL:,.0f} | **Expected**: {ae.EXPECTED:,.0f}")
                     st.markdown(str(ae.EXPLANATION))
 
-    # ── 9. Ask Cortex (Enhanced) ──
-    st.markdown('<div class="sub-hdr">💬 Ask Cortex</div>', True)
-    suggestions = [
-        "What does the Rt number mean for me?",
-        "Should I be worried right now?",
-        "Is it getting better or worse here?",
-    ]
-    cols = st.columns(len(suggestions))
-    for i, q in enumerate(suggestions):
-        if cols[i].button(q, key=f"sugg_{i}"):
-            st.session_state["prefill_q"] = q
-
-    user_q = st.text_input("Your question:", value=st.session_state.get("prefill_q", ""))
-
-    if st.button("Ask Cortex") and user_q:
-        rt_v = safe_val(cr, 'RT_EFFECTIVE')
-        cases_v = safe_val(cr, 'ROLLING_AVG_7D_CASES', "{:,.0f}")
-        phase_v = getattr(cr, 'EPIDEMIC_PHASE', '—')
-        trend_v = safe_val(cr, 'FORECAST_TREND_PCT', "{:.1f}")
-
-        prompt = f"""You are an expert epidemiologist helping a regular person understand COVID-19 in {sel_country}:
-• 7-day avg cases: {cases_v}
-• Rt: {rt_v}
-• Risk: {cr.RISK_TIER} ({score_val}/100)
-• Phase: {phase_v}
-• Forecast trend: {trend_v}%
-
-Do expert analysis but answer in under 4 sentences using simple, everyday language.
-Reference the specific numbers and explain what they mean.
-Question: {user_q}"""
-
-        try:
-            with st.spinner("Cortex is thinking..."):
-                result = session.sql(
-                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${prompt}$$)"
-                ).collect()[0][0]
-            st.info(str(result))
-        except Exception as e:
-            st.error(f"Cortex error: {e}")
 
     # ── All Country Summaries ──
     if not narratives.empty:
@@ -792,7 +911,7 @@ Every country has an identical validation window for fair MAPE comparison.
 | Preventive Measures | mistral-large | Risk level + epidemic phase + forecast + model confidence |
 | Policy Simulation | mistral-large | ML predictions + historical peaks + risk factors |
 | Compare Countries | mistral-large (live) | Risk tiers + Rt + forecast trends for selected countries |
-| Ask Cortex | mistral-large (live) | Current country metrics + risk assessment |
+| Sentinel Chatbot | mistral-large (live) | 2-step: SQL generation + plain English explanation |
 
 ### Risk Scoring (8 Factors — All Absolute Thresholds)
 | Factor | Max Pts | Threshold |
@@ -824,7 +943,95 @@ Every claim references specific numbers the user can verify in the dashboard:
     """)
 
 
-# ── Footer ───────────────────────────────────────────────────
-st.markdown(f'<div class="footer">Sentinel — Epidemiological Intelligence | '
-            f'Snowflake ML + Cortex | For research purposes only</div>', True)
+# ── Floating Chatbot ─────────────────────────────────────────
+# Toggle button (Streamlit widget — drives session state)
+chat_toggle_col = st.columns([10, 1])
+with chat_toggle_col[1]:
+    if st.button("💬" if not st.session_state.chat_open else "✕", key="chat_fab_btn"):
+        st.session_state.chat_open = not st.session_state.chat_open
+        st.rerun()
 
+# Floating bubble (pure CSS — visual only, the real toggle is the Streamlit button above)
+st.markdown(
+    '<div class="chat-fab" style="pointer-events:none;">'
+    f'{"✕" if st.session_state.chat_open else "💬"}</div>', True
+)
+
+if st.session_state.chat_open:
+    # Build message HTML
+    msgs_html = ""
+    for msg in st.session_state.chat_messages:
+        css_class = "user" if msg['role'] == 'user' else "bot"
+        msgs_html += f'<div class="chat-msg {css_class}"><div class="bubble">{msg["content"]}</div></div>'
+
+    if not st.session_state.chat_messages:
+        msgs_html = (
+            '<div class="chat-msg bot"><div class="bubble">'
+            f'👋 Hi! I\'m <b>Sentinel</b>, your COVID-19 data assistant. '
+            f'I can help you understand anything about COVID-19 data for <b>{sel_country}</b> '
+            f'or any other country in the dashboard. Ask me anything!'
+            '</div></div>'
+        )
+
+    # Render the floating panel
+    st.markdown(f"""
+    <div class="chat-panel">
+        <div class="chat-header">
+            <span>💬 Ask Sentinel</span>
+            <small>{sel_country} • {cr.RISK_TIER}</small>
+        </div>
+        <div class="chat-body" id="chat-body">{msgs_html}</div>
+    </div>
+    <script>var cb=document.getElementById('chat-body');if(cb)cb.scrollTop=cb.scrollHeight;</script>
+    """, True)
+
+    # Suggested questions
+    st.markdown("---")
+    st.markdown("**Quick questions:**")
+    sugg_questions = [
+        "📊 Explain my country's risk score",
+        "📈 What does the forecast predict?",
+        "🔢 What does Rt mean for me?",
+        "⚠️ Any unusual patterns detected?",
+        "🌍 How is the world doing overall?",
+        "🛡️ What should I do to stay safe?",
+    ]
+    sugg_cols = st.columns(3)
+    for i, sq in enumerate(sugg_questions):
+        if sugg_cols[i % 3].button(sq, key=f"chat_sq_{i}"):
+            st.session_state.chat_pending = sq
+            st.rerun()
+
+    # Chat input
+    chat_input = st.text_input(
+        "Ask me anything about COVID-19...",
+        key="chat_input_field",
+        label_visibility="collapsed",
+        placeholder="Type your question about COVID-19 data..."
+    )
+    send_col1, send_col2 = st.columns([5, 1])
+    with send_col2:
+        send_clicked = st.button("Send", key="chat_send_btn", type="primary")
+
+    # Process pending suggestion or typed input
+    pending = st.session_state.pop('chat_pending', None)
+    if send_clicked and chat_input:
+        pending = chat_input
+
+    if pending:
+        st.session_state.chat_messages.append({"role": "user", "content": pending})
+        with st.spinner("🔍 Looking up the data..."):
+            response = chat_respond(pending, cr, sel_country, score_val)
+        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+        st.rerun()
+
+    # Clear chat button
+    if st.session_state.chat_messages:
+        if st.button("🗑️ Clear chat", key="chat_clear"):
+            st.session_state.chat_messages = []
+            st.rerun()
+
+
+# ── Footer ───────────────────────────────────────────────────
+st.markdown(f'<div class="footer">Sentinel — COVID-19 Insights for Everyone | '
+            f'Snowflake ML + Cortex | For research purposes only</div>', True)
