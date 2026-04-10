@@ -1,5 +1,5 @@
 """
-Sentinel — Public Health Intelligence Dashboard
+Sentinel — COVID-19 Insights for Everyone
 Streamlit in Snowflake (SiS) Application
 Packages needed: plotly
 Python: 3.10
@@ -499,11 +499,11 @@ with tabs[2]:
 
 # ═══════════ TAB 4: INTELLIGENCE ═════════════════════════════
 with tabs[3]:
-    st.markdown(f'<div class="sec-hdr">Intelligence Briefing — {sel_country}</div>', True)
+    st.markdown(f'<div class="sec-hdr">COVID-19 Insights — {sel_country}</div>', True)
 
     # ── 1. Global Situation ──
     if not global_triage.empty:
-        with st.expander("🌐 Global Situation Summary", expanded=False):
+        with st.expander("🌍 What’s Happening Around the World", expanded=False):
             st.markdown(str(global_triage.iloc[0].GLOBAL_BRIEF))
 
     # Get country narrative row
@@ -518,7 +518,7 @@ with tabs[3]:
 
         # ── 2. Executive Summary ──
         if hasattr(narr_row, 'EXECUTIVE_BRIEF') and pd.notna(narr_row.EXECUTIVE_BRIEF):
-            with st.expander("📋 Executive Summary", expanded=True):
+            with st.expander("📋 Quick Summary", expanded=True):
                 st.markdown(str(narr_row.EXECUTIVE_BRIEF))
 
         # ── 3. What Do These Numbers Mean? ──
@@ -528,12 +528,12 @@ with tabs[3]:
 
         # ── 4. Situation Report ──
         if hasattr(narr_row, 'SITUATION_SUMMARY') and pd.notna(narr_row.SITUATION_SUMMARY):
-            with st.expander("📖 Situation Report", expanded=False):
+            with st.expander("📖 What’s the Situation?", expanded=False):
                 st.markdown(str(narr_row.SITUATION_SUMMARY))
 
         # ── 5. Preventive Measures ──
         if hasattr(narr_row, 'PREVENTIVE_MEASURES') and pd.notna(narr_row.PREVENTIVE_MEASURES):
-            with st.expander("🛡️ Preventive Measures", expanded=False):
+            with st.expander("🛡️ What Can I Do to Stay Safe?", expanded=False):
                 st.markdown(str(narr_row.PREVENTIVE_MEASURES))
     else:
         st.info("Cortex narratives not generated yet. Run 04_risk_and_cortex.sql.")
@@ -565,18 +565,19 @@ with tabs[3]:
             )
 
         countries_str = " | ".join(country_data_parts)
-        prompt = f"""You are a public health intelligence analyst.
-Compare these countries based on their COVID-19 data:
+        prompt = f"""You are a senior epidemiologist comparing COVID-19 situations across countries.
+Your audience is regular people with no medical background. Do expert-level analysis but explain everything simply.
 
+Data:
 {countries_str}
 
 Write a structured comparison covering:
-1. Which country is in the most critical situation and why
-2. How their epidemic trajectories differ
-3. What each country can learn from the others
-4. Recommended priority action for each country
+1. Which country is dealing with the toughest situation and why (cite the numbers)
+2. How the epidemic trajectories differ across these countries
+3. What people in each country can learn from the others
+4. One practical takeaway for each country
 
-Reference the specific numbers. Write for a non-technical government official.
+Reference the specific numbers and explain what they mean. Analyze deeply, write simply.
 Under 400 words. No bullet points."""
 
         try:
@@ -594,7 +595,7 @@ Under 400 words. No bullet points."""
     if not policy_sims.empty:
         sim_row = policy_sims[policy_sims.COUNTRY_REGION == sel_country]
         if not sim_row.empty:
-            with st.expander("🔮 Policy Simulation — What-If Scenarios", expanded=False):
+            with st.expander("🔮 What Could Happen Next? — Different Scenarios", expanded=False):
                 st.markdown(str(sim_row.iloc[0].SCENARIO_ANALYSIS))
 
     # ── 8. Anomaly Explanations ──
@@ -613,9 +614,9 @@ Under 400 words. No bullet points."""
     # ── 9. Ask Cortex (Enhanced) ──
     st.markdown('<div class="sub-hdr">💬 Ask Cortex</div>', True)
     suggestions = [
-        "What does the Rt mean for us?",
-        "Should we tighten restrictions?",
-        "How does our forecast compare to our peak?",
+        "What does the Rt number mean for me?",
+        "Should I be worried right now?",
+        "Is it getting better or worse here?",
     ]
     cols = st.columns(len(suggestions))
     for i, q in enumerate(suggestions):
@@ -630,15 +631,15 @@ Under 400 words. No bullet points."""
         phase_v = getattr(cr, 'EPIDEMIC_PHASE', '—')
         trend_v = safe_val(cr, 'FORECAST_TREND_PCT', "{:.1f}")
 
-        prompt = f"""You are a public health intelligence analyst. COVID-19 data for {sel_country}:
+        prompt = f"""You are an expert epidemiologist helping a regular person understand COVID-19 in {sel_country}:
 • 7-day avg cases: {cases_v}
 • Rt: {rt_v}
 • Risk: {cr.RISK_TIER} ({score_val}/100)
 • Phase: {phase_v}
 • Forecast trend: {trend_v}%
 
-Answer in under 4 sentences for a non-technical government official.
-Reference the specific numbers in your answer.
+Do expert analysis but answer in under 4 sentences using simple, everyday language.
+Reference the specific numbers and explain what they mean.
 Question: {user_q}"""
 
         try:
@@ -654,7 +655,7 @@ Question: {user_q}"""
     if not narratives.empty:
         col_check = 'EXECUTIVE_BRIEF' if 'EXECUTIVE_BRIEF' in narratives.columns else ('SITUATION_SUMMARY' if 'SITUATION_SUMMARY' in narratives.columns else None)
         if col_check:
-            st.markdown('<div class="sub-hdr">All Country Briefs</div>', True)
+            st.markdown('<div class="sub-hdr">All Country Summaries</div>', True)
             for idx, n in narratives.iterrows():
                 brief_text = str(getattr(n, col_check, ''))
                 if brief_text and brief_text != 'nan':

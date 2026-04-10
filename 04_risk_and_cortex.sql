@@ -331,9 +331,9 @@ SELECT
 
     -- ═══ COLUMN 1: METRIC EXPLAINER ═══
     SNOWFLAKE.CORTEX.COMPLETE('mistral-large', CONCAT(
-        'You are explaining COVID-19 data to a government official with ZERO science background.',
-        ' Explain what each of these numbers means for ', c.COUNTRY_REGION,
-        ' and whether it is good, concerning, or critical.\n\n',
+        'You are an expert epidemiologist analyzing COVID-19 data for ', c.COUNTRY_REGION, '.',
+        ' Your audience is everyday people with NO medical or science background.',
+        ' Explain what each number means in simple, relatable terms — as if you are a doctor explaining test results to a patient.\n\n',
         'DATA (these are actual measured and ML-predicted values — cite them directly):\n',
         '• Rt (reproduction number) = ', COALESCE(ROUND(c.RT_EFFECTIVE,2)::STRING, 'unavailable'),
         ' — each infected person spreads to this many others\n',
@@ -362,17 +362,18 @@ SELECT
         '/day on ', COALESCE(c.ALL_TIME_PEAK_DATE::STRING,'N/A'), ')\n',
         '• Anomalies detected: ', c.TOTAL_ANOMALIES::STRING,
         ' (', c.ANOMALY_SPIKES::STRING, ' spikes, ', c.ANOMALY_DROPS::STRING, ' drops)\n\n',
-        'For EACH metric, write a short paragraph using a simple real-world analogy.\n',
+        'For EACH metric, do a thorough analysis but write a short paragraph using a simple real-world analogy that anyone can relate to.\n',
         'Start each paragraph with the metric name in bold.\n',
         'Include what the ML model predicts and how confident it is.\n',
         'Always reference the actual value. Example: "An Rt of 0.87 means...".\n',
-        'No jargon. Separate paragraphs with blank lines.'
+        'You are an expert doing deep analysis, but write so a high-school student could understand it. No jargon. Separate paragraphs with blank lines.'
     )) AS METRIC_EXPLAINER,
 
     -- ═══ COLUMN 2: SITUATION SUMMARY ═══
     SNOWFLAKE.CORTEX.COMPLETE('mistral-large', CONCAT(
-        'Write a situation briefing for ', c.COUNTRY_REGION,
-        '''s health minister. Base EVERY statement on the data below.\n\n',
+        'You are a senior epidemiologist writing a thorough situation update about COVID-19 in ', c.COUNTRY_REGION, '.',
+        ' Your analysis must be rigorous, but your audience is regular people — not scientists or officials.',
+        ' Write so anyone can understand what is happening and what it means for them. Base EVERY statement on the data below.\n\n',
         'CURRENT DATA (cite these specific numbers in your analysis):\n',
         '• Date: ', c.DATA_DATE::STRING, '\n',
         '• Daily new cases (7-day avg): ', ROUND(c.ROLLING_AVG_7D_CASES,0)::STRING, '\n',
@@ -410,14 +411,14 @@ SELECT
         CASE WHEN c.LAST_ANOMALY_DATE IS NOT NULL
             THEN CONCAT('• Most recent anomaly: ', c.LAST_ANOMALY_DATE::STRING, '\n')
             ELSE '' END,
-        '\nWrite exactly 4 paragraphs:\n',
-        'Para 1: Current situation — what is happening NOW. Reference the specific numbers.\n',
-        'Para 2: 30-day outlook based on the ML forecast. Mention the confidence range.\n',
-        'Para 3: Risk assessment — explain why this country is ', c.RISK_TIER,
-        ' and what factors drive the score.\n',
-        'Para 4: Two specific recommended actions based on the data.\n\n',
+        '\nWrite exactly 4 paragraphs with expert-level analysis but in everyday language:\n',
+        'Para 1: Current situation — what is happening NOW and why it matters. Reference the specific numbers but explain what they mean.\n',
+        'Para 2: 30-day outlook — what the data and ML models predict for the coming weeks. Explain the confidence range in simple terms.\n',
+        'Para 3: Risk assessment — do a deep dive into why this country is rated ', c.RISK_TIER,
+        ', break down the key risk factors, and explain what this means for people in their daily lives.\n',
+        'Para 4: Two practical recommendations — what regular people should actually do based on your expert analysis.\n\n',
         'RULES: Every claim must reference a specific data point above.\n',
-        'Write for a newspaper reader. No jargon. No bullet points.'
+        'Analyze like a scientist. Write like a caring doctor explaining results to a patient. No jargon. No bullet points.'
     )) AS SITUATION_SUMMARY,
 
     -- ═══ COLUMN 3: PREVENTIVE MEASURES ═══
@@ -431,14 +432,14 @@ SELECT
         '• Forecast trend: ', ROUND(c.FORECAST_TREND_PCT,1)::STRING, '%\n',
         '• Model confidence: ', COALESCE(c.MODEL_CONFIDENCE,'unknown'), '\n',
         '• Current vs all-time peak: ', COALESCE(c.PCT_OF_ALL_TIME_PEAK::STRING,'N/A'), '%\n\n',
-        'Recommend 5 preventive measures APPROPRIATE for this risk level.\n',
-        'For each measure:\n',
-        '1. State the recommendation clearly\n',
-        '2. Explain WHY this data supports it (reference the specific numbers above)\n\n',
-        'If risk is LOW (score < 25): focus on surveillance and maintenance.\n',
-        'If risk is MODERATE (25-49): focus on targeted interventions.\n',
-        'If risk is HIGH (≥ 50): focus on urgent escalation measures.\n\n',
-        'Ground every recommendation in the actual data. No generic advice.'
+        'As a public health expert, recommend 5 practical things everyday people should do to stay safe, APPROPRIATE for this risk level.\n',
+        'For each recommendation:\n',
+        '1. State it clearly in plain language anyone can follow\n',
+        '2. Give your expert reasoning — explain WHY the data supports it (reference the specific numbers above)\n\n',
+        'If risk is LOW (score < 25): focus on staying aware and maintaining healthy habits.\n',
+        'If risk is MODERATE (25-49): focus on being more cautious — explain what to watch for.\n',
+        'If risk is HIGH (≥ 50): explain what people need to do RIGHT NOW and why the numbers make it urgent.\n\n',
+        'Think like an epidemiologist, write like a doctor talking to a patient. Ground every recommendation in the actual data. No generic advice.'
     )) AS PREVENTIVE_MEASURES,
 
     CURRENT_TIMESTAMP() AS GENERATED_AT
@@ -484,16 +485,16 @@ SELECT
     SNOWFLAKE.CORTEX.COMPLETE(
         'mistral-large',
         CONCAT(
-            'You are an epidemiological data analyst. A COVID-19 anomaly was detected for ',
+            'You are an expert data analyst explaining a COVID-19 anomaly to everyday people. An unusual change was detected for ',
             a.COUNTRY_REGION, ' on ', a.DATE::STRING, ': ',
             'Actual daily cases: ', ROUND(a.DAILY_NEW_CASES, 0)::STRING, '. ',
             'Expected baseline: ', ROUND(a.EXPECTED, 0)::STRING, '. ',
             'Deviation: ', ROUND(a.DEVIATION_PCT, 1)::STRING, '%. ',
             'Direction: ', a.ANOMALY_DIRECTION, '. ',
             'Day of week: ', DAYNAME(a.DATE), '. ',
-            'Write exactly 2 sentences for a non-technical official. ',
-            'Sentence 1: describe the anomaly in plain English with the numbers. ',
-            'Sentence 2: the most likely epidemiological or reporting explanation.'
+            'Write exactly 2 sentences that anyone can understand. ',
+            'Sentence 1: describe what happened using the numbers but explain them simply. ',
+            'Sentence 2: give your expert analysis of the most likely reason, explained in plain English.'
         )
     ) AS EXPLANATION
 FROM top_anomalies a;
@@ -508,19 +509,20 @@ SELECT
     SNOWFLAKE.CORTEX.COMPLETE(
         'mistral-large',
         CONCAT(
-            'You are a public health advisor. Here is the COVID-19 risk assessment for all tracked countries: ',
+            'You are a senior public health analyst providing a global COVID-19 overview. Your audience is everyday people, not officials.',
+            ' Here is the risk data for all tracked countries: ',
             (SELECT LISTAGG(
                 CONCAT(COUNTRY_REGION, ': ', RISK_TIER, ' (Score ', RISK_SCORE::STRING,
                        ', Rt=', COALESCE(ROUND(RT_EFFECTIVE, 2)::STRING, 'N/A'),
                        ', 7d avg=', ROUND(ROLLING_AVG_7D_CASES, 0)::STRING, ')'),
                 '; '
             ) FROM PUBLIC_HEALTH_DB.ANALYTICS.RISK_TIERS),
-            '. Write a 4-sentence global situation summary for a government leader. ',
-            'Sentence 1: Overall global trend — are cases rising or falling? ',
-            'Sentence 2: Which countries need urgent attention and why (cite their Rt and scores). ',
-            'Sentence 3: Which countries are stable and why. ',
-            'Sentence 4: One priority action. ',
-            'Do not use bullet points. Write in plain English.'
+            '. Do an expert analysis but write a 4-sentence summary anyone can understand. ',
+            'Sentence 1: Overall global trend — are things getting better or worse, and what do the numbers show? ',
+            'Sentence 2: Which countries are in the most trouble — cite their specific numbers and explain why they matter. ',
+            'Sentence 3: Which countries are in good shape and what is going right there. ',
+            'Sentence 4: One key takeaway people should remember. ',
+            'Do not use bullet points. Analyze deeply but write simply.'
         )
     ) AS GLOBAL_BRIEF,
     CURRENT_TIMESTAMP() AS GENERATED_AT;
@@ -535,7 +537,9 @@ CREATE OR REPLACE TABLE PUBLIC_HEALTH_DB.ANALYTICS.POLICY_SIMULATIONS AS
 SELECT
     c.COUNTRY_REGION, c.RISK_TIER,
     SNOWFLAKE.CORTEX.COMPLETE('mistral-large', CONCAT(
-        'You are advising ', c.COUNTRY_REGION, '''s government on COVID-19 scenarios.\n\n',
+        'You are a senior epidemiologist running scenario analysis for ', c.COUNTRY_REGION, '.',
+        ' Your audience is regular people who want to understand what could happen next.',
+        ' Do rigorous analysis but explain everything in plain language.\n\n',
         'CURRENT DATA:\n',
         '• 7-day avg cases: ', ROUND(c.ROLLING_AVG_7D_CASES,0)::STRING, '/day\n',
         '• Rt: ', COALESCE(ROUND(c.RT_EFFECTIVE,2)::STRING, 'N/A'), '\n',
@@ -573,11 +577,11 @@ SELECT
         'SCENARIO C (Intervene Now): Interventions reduce Rt by 25% to ',
         COALESCE(ROUND(c.RT_EFFECTIVE * 0.75, 2)::STRING, 'N/A'),
         '. What happens to the forecast trajectory?\n\n',
-        'For each scenario: expected case trajectory (cite specific numbers), ',
-        'hospital stress level (LOW/MEDIUM/HIGH/CRITICAL), and one specific action.\n',
+        'For each scenario: apply your expert analysis to project what people can expect (cite specific numbers), ',
+        'how strained hospitals might become (LOW/MEDIUM/HIGH/CRITICAL), and one practical thing people can do.\n',
         'State the model confidence level (', COALESCE(c.MODEL_CONFIDENCE,'unknown'),
-        ') when citing predictions.\n',
-        'Under 400 words. Plain English.'
+        ') when citing predictions — and explain what that confidence level means in plain terms.\n',
+        'Under 400 words. Analyze like a scientist, write so anyone can understand.'
     )) AS SCENARIO_ANALYSIS,
     CURRENT_TIMESTAMP() AS GENERATED_AT
 FROM PUBLIC_HEALTH_DB.ANALYTICS.VW_CORTEX_CONTEXT c;
