@@ -20,20 +20,20 @@ Public Pulse uses a 100% Snowflake-native architecture without needing any exter
 
 ```mermaid
 flowchart TD
-    subgraph Snowflake Marketplace
+    subgraph Market ["Snowflake Marketplace"]
         JHU(JHU_COVID_19)
         Vax(OWID_VACCINATIONS)
         Mob(GOOG_MOBILITY)
     end
 
-    subgraph Data Pipeline
+    subgraph Pipeline ["Data Pipeline"]
         Ingest[01 - Data Ingestion & Joins]
         FeatEng[02 - Feature Engineering\nRt, CFR, Doubling Time]
         ML[03 - Snowflake ML Models\nFORECAST & ANOMALY_DETECTION]
         Risk[04 - Risk Scoring\n8-Factor Composite]
     end
 
-    subgraph User Interface (Streamlit in Snowflake)
+    subgraph UI ["User Interface (Streamlit in Snowflake)"]
         Dash[Interactive Dashboards\nEpidemiology, Forecast, Anomalies]
         Chat[Dynamic AI Chatbot\n2-Step Text-to-SQL]
     end
