@@ -120,12 +120,17 @@ def load_all():
         metrics_df = query("SELECT * FROM PUBLIC_HEALTH_DB.ML.FORECAST_METRICS")
     except Exception:
         metrics_df = pd.DataFrame()
+    try:
+        policy_sims = query("SELECT * FROM PUBLIC_HEALTH_DB.ANALYTICS.POLICY_SIMULATIONS ORDER BY COUNTRY_REGION")
+    except Exception:
+        policy_sims = pd.DataFrame()
 
     return {
         'risk': risk, 'features': features, 'hf': hf, 'forecast': forecast,
         'anomalies': anomalies, 'narratives': narratives,
         'anomaly_expl': anomaly_expl, 'global_triage': global_triage,
-        'vaccinations': vaccinations, 'metrics': metrics_df
+        'vaccinations': vaccinations, 'metrics': metrics_df,
+        'policy_sims': policy_sims
     }
 
 data = load_all()
@@ -139,6 +144,7 @@ anomaly_expl = data['anomaly_expl']
 global_triage = data['global_triage']
 vaccinations = data['vaccinations']
 metrics_df = data['metrics']
+policy_sims = data['policy_sims']
 
 countries = risk['COUNTRY_REGION'].tolist()
 
@@ -495,41 +501,121 @@ with tabs[2]:
 with tabs[3]:
     st.markdown(f'<div class="sec-hdr">Intelligence Briefing — {sel_country}</div>', True)
 
-    # Global triage
+    # ── 1. Global Situation ──
     if not global_triage.empty:
-        with st.expander("Global Situation Summary", expanded=False):
+        with st.expander("🌐 Global Situation Summary", expanded=False):
             st.markdown(str(global_triage.iloc[0].GLOBAL_BRIEF))
 
-    # Country health brief
+    # Get country narrative row
+    narr_row = None
     if not narratives.empty:
         narr = narratives[narratives.COUNTRY_REGION == sel_country]
         if not narr.empty:
-            n = narr.iloc[0]
-            st.markdown(f'{tier_badge(n.RISK_TIER)} &nbsp; Score: {n.RISK_SCORE}/100', True)
-            st.markdown("#### AI Health Brief")
-            st.info(str(n.HEALTH_BRIEF))
+            narr_row = narr.iloc[0]
+
+    if narr_row is not None:
+        st.markdown(f'{tier_badge(narr_row.RISK_TIER)} &nbsp; Score: {int(narr_row.RISK_SCORE)}/100', True)
+
+        # ── 2. Executive Summary ──
+        if hasattr(narr_row, 'EXECUTIVE_BRIEF') and pd.notna(narr_row.EXECUTIVE_BRIEF):
+            with st.expander("📋 Executive Summary", expanded=True):
+                st.markdown(str(narr_row.EXECUTIVE_BRIEF))
+
+        # ── 3. What Do These Numbers Mean? ──
+        if hasattr(narr_row, 'METRIC_EXPLAINER') and pd.notna(narr_row.METRIC_EXPLAINER):
+            with st.expander("🔢 What Do These Numbers Mean?", expanded=False):
+                st.markdown(str(narr_row.METRIC_EXPLAINER))
+
+        # ── 4. Situation Report ──
+        if hasattr(narr_row, 'SITUATION_SUMMARY') and pd.notna(narr_row.SITUATION_SUMMARY):
+            with st.expander("📖 Situation Report", expanded=False):
+                st.markdown(str(narr_row.SITUATION_SUMMARY))
+
+        # ── 5. Preventive Measures ──
+        if hasattr(narr_row, 'PREVENTIVE_MEASURES') and pd.notna(narr_row.PREVENTIVE_MEASURES):
+            with st.expander("🛡️ Preventive Measures", expanded=False):
+                st.markdown(str(narr_row.PREVENTIVE_MEASURES))
     else:
         st.info("Cortex narratives not generated yet. Run 04_risk_and_cortex.sql.")
 
-    # Anomaly explanations
+    # ── 6. Compare Countries ──
+    st.markdown('<div class="sub-hdr">⚖️ Compare Countries</div>', True)
+    compare_countries = st.multiselect(
+        "Select countries to compare",
+        countries,
+        default=[],
+        max_selections=4,
+        key="intel_compare"
+    )
+
+    if len(compare_countries) >= 2 and st.button("🔍 Generate Comparison", key="compare_btn"):
+        # Build context for each selected country from VW_CORTEX_CONTEXT
+        country_data_parts = []
+        for cc in compare_countries:
+            cc_risk = risk[risk.COUNTRY_REGION == cc]
+            if cc_risk.empty:
+                continue
+            ccr = cc_risk.iloc[0]
+            country_data_parts.append(
+                f"{cc}: Rt={safe_val(ccr, 'RT_EFFECTIVE')}, "
+                f"7d avg={safe_val(ccr, 'ROLLING_AVG_7D_CASES', '{:,.0f}')}, "
+                f"Phase={getattr(ccr, 'EPIDEMIC_PHASE', '—')}, "
+                f"Risk={getattr(ccr, 'RISK_TIER', '—')} ({safe_val(ccr, 'RISK_SCORE', '{:.0f}')}/100), "
+                f"Forecast trend={safe_val(ccr, 'FORECAST_TREND_PCT', '{:.1f}')}%"
+            )
+
+        countries_str = " | ".join(country_data_parts)
+        prompt = f"""You are a public health intelligence analyst.
+Compare these countries based on their COVID-19 data:
+
+{countries_str}
+
+Write a structured comparison covering:
+1. Which country is in the most critical situation and why
+2. How their epidemic trajectories differ
+3. What each country can learn from the others
+4. Recommended priority action for each country
+
+Reference the specific numbers. Write for a non-technical government official.
+Under 400 words. No bullet points."""
+
+        try:
+            with st.spinner("Cortex is comparing..."):
+                result = session.sql(
+                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${prompt}$$)"
+                ).collect()[0][0]
+            st.info(str(result))
+        except Exception as e:
+            st.error(f"Cortex comparison error: {e}")
+    elif len(compare_countries) == 1:
+        st.caption("Select at least 2 countries to compare.")
+
+    # ── 7. Policy Simulation ──
+    if not policy_sims.empty:
+        sim_row = policy_sims[policy_sims.COUNTRY_REGION == sel_country]
+        if not sim_row.empty:
+            with st.expander("🔮 Policy Simulation — What-If Scenarios", expanded=False):
+                st.markdown(str(sim_row.iloc[0].SCENARIO_ANALYSIS))
+
+    # ── 8. Anomaly Explanations ──
     if not anomaly_expl.empty:
         anom_e = anomaly_expl[anomaly_expl.COUNTRY_REGION == sel_country]
         if 'DEVIATION_PCT' in anom_e.columns:
             anom_e = anom_e.sort_values('DEVIATION_PCT', ascending=False, key=abs)
         if not anom_e.empty:
-            st.markdown('<div class="sub-hdr">Anomaly Explanations</div>', True)
+            st.markdown('<div class="sub-hdr">🚨 Anomaly Explanations</div>', True)
             for idx, ae in anom_e.iterrows():
                 date_str = str(ae.DATE.date()) if hasattr(ae.DATE, 'date') else str(ae.DATE)
                 with st.expander(f"{date_str} — {ae.ANOMALY_DIRECTION} ({ae.DEVIATION_PCT:+.0f}%)"):
                     st.markdown(f"**Actual**: {ae.ACTUAL:,.0f} | **Expected**: {ae.EXPECTED:,.0f}")
                     st.markdown(str(ae.EXPLANATION))
 
-    # Live Q&A
-    st.markdown('<div class="sub-hdr">Ask Cortex</div>', True)
+    # ── 9. Ask Cortex (Enhanced) ──
+    st.markdown('<div class="sub-hdr">💬 Ask Cortex</div>', True)
     suggestions = [
-        "Compare to Europe?",
-        "Travel restrictions?",
-        "Press conference summary?",
+        "What does the Rt mean for us?",
+        "Should we tighten restrictions?",
+        "How does our forecast compare to our peak?",
     ]
     cols = st.columns(len(suggestions))
     for i, q in enumerate(suggestions):
@@ -541,26 +627,39 @@ with tabs[3]:
     if st.button("Ask Cortex") and user_q:
         rt_v = safe_val(cr, 'RT_EFFECTIVE')
         cases_v = safe_val(cr, 'ROLLING_AVG_7D_CASES', "{:,.0f}")
-        prompt = f"""You are a public health analyst. COVID-19 data for {sel_country}:
-7-day avg cases: {cases_v}. Rt: {rt_v}.
-Risk: {cr.RISK_TIER} ({score_val}/100). Phase: {cr.EPIDEMIC_PHASE}.
-Answer in under 4 sentences for a non-technical official. Question: {user_q}"""
+        phase_v = getattr(cr, 'EPIDEMIC_PHASE', '—')
+        trend_v = safe_val(cr, 'FORECAST_TREND_PCT', "{:.1f}")
+
+        prompt = f"""You are a public health intelligence analyst. COVID-19 data for {sel_country}:
+• 7-day avg cases: {cases_v}
+• Rt: {rt_v}
+• Risk: {cr.RISK_TIER} ({score_val}/100)
+• Phase: {phase_v}
+• Forecast trend: {trend_v}%
+
+Answer in under 4 sentences for a non-technical government official.
+Reference the specific numbers in your answer.
+Question: {user_q}"""
 
         try:
             with st.spinner("Cortex is thinking..."):
                 result = session.sql(
-                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-70b', $${prompt}$$)"
+                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${prompt}$$)"
                 ).collect()[0][0]
             st.info(str(result))
         except Exception as e:
             st.error(f"Cortex error: {e}")
 
-    # All country summaries
+    # ── All Country Summaries ──
     if not narratives.empty:
-        st.markdown('<div class="sub-hdr">All Country Briefs</div>', True)
-        for idx, n in narratives.iterrows():
-            with st.expander(f"{n.COUNTRY_REGION} — {n.RISK_TIER} ({n.RISK_SCORE}/100)"):
-                st.markdown(str(n.HEALTH_BRIEF))
+        col_check = 'EXECUTIVE_BRIEF' if 'EXECUTIVE_BRIEF' in narratives.columns else ('SITUATION_SUMMARY' if 'SITUATION_SUMMARY' in narratives.columns else None)
+        if col_check:
+            st.markdown('<div class="sub-hdr">All Country Briefs</div>', True)
+            for idx, n in narratives.iterrows():
+                brief_text = str(getattr(n, col_check, ''))
+                if brief_text and brief_text != 'nan':
+                    with st.expander(f"{n.COUNTRY_REGION} — {n.RISK_TIER} ({int(n.RISK_SCORE)}/100)"):
+                        st.markdown(brief_text)
 
 
 # ═══════════ TAB 5: COMPARISON ═══════════════════════════════
@@ -669,6 +768,9 @@ Johns Hopkins University CSSE COVID-19 Dataset via Snowflake Marketplace (Starsc
 | `JHU_COVID_19` | JHU CSSE | Case and death time-series |
 | `GOOG_GLOBAL_MOBILITY_REPORT` | Google | Mobility index (risk factor) |
 | `OWID_VACCINATIONS` | OWID | Vaccination coverage |
+| `VW_CORTEX_CONTEXT` | Pipeline View | One-row-per-country context for AI grounding |
+| `CORTEX_NARRATIVES` | Cortex AI | 4-column AI intelligence per country |
+| `POLICY_SIMULATIONS` | Cortex AI | 3-scenario what-if analysis per country |
 
 ### Machine Learning
 | Model | Engine | Train Period | Confidence |
@@ -680,6 +782,16 @@ Johns Hopkins University CSSE COVID-19 Dataset via Snowflake Marketplace (Starsc
 ### Train/Test Split
 **Fixed calendar split**: Train on Jan 2020 – Mar 31, 2022. Validate on Apr 2022 – Mar 2023.
 Every country has an identical validation window for fair MAPE comparison.
+
+### AI Intelligence (Cortex)
+| Narrative | Model | Grounding |
+|-----------|-------|-----------|
+| Metric Explainer | mistral-large | All 25+ features + 8-factor risk breakdown + ML forecast trajectory + MAPE |
+| Situation Summary | mistral-large | Current data + forecast + anomalies + historical wave context |
+| Preventive Measures | mistral-large | Risk level + epidemic phase + forecast + model confidence |
+| Policy Simulation | mistral-large | ML predictions + historical peaks + risk factors |
+| Compare Countries | mistral-large (live) | Risk tiers + Rt + forecast trends for selected countries |
+| Ask Cortex | mistral-large (live) | Current country metrics + risk assessment |
 
 ### Risk Scoring (8 Factors — All Absolute Thresholds)
 | Factor | Max Pts | Threshold |
@@ -693,6 +805,15 @@ Every country has an identical validation window for fair MAPE comparison.
 | Case volume | 5 | >50K/day → 5, >10K → 2 |
 | Recent anomaly | 5 | Anomaly in last 7 days → 5 |
 
+### AI Grounding Strategy
+All AI narratives are grounded in **actual pipeline data** — not external documents.
+Every claim references specific numbers the user can verify in the dashboard:
+- Epidemiological indicators from `COVID_FEATURES`
+- 8-factor risk breakdown from `RISK_TIERS`
+- 30-day forecast trajectory + MAPE from `FORECASTS` / `FORECAST_METRICS`
+- Anomaly detection stats from `ANOMALIES`
+- Historical wave peaks from computed analysis
+
 ### Fairness
 - **Africa bias**: Nigeria/South Africa have highest null rates — flagged explicitly
 - **Vaccination gap**: OWID data loaded where available; absence documented
@@ -705,3 +826,4 @@ Every country has an identical validation window for fair MAPE comparison.
 # ── Footer ───────────────────────────────────────────────────
 st.markdown(f'<div class="footer">Sentinel — Epidemiological Intelligence | '
             f'Snowflake ML + Cortex | For research purposes only</div>', True)
+
