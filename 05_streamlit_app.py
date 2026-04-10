@@ -78,36 +78,11 @@ section[data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.15); }}
     padding: 3px 12px; border-radius: 4px; font-weight: 600; font-size: .85rem; }}
 .footer {{ text-align: center; color: {GRAY_500}; font-size: .8rem;
     padding: 1.5rem 0 .5rem 0; border-top: 1px solid {GRAY_100}; margin-top: 2rem; }}
-/* ── Floating Chatbot ── */
-.chat-fab {{ position: fixed; bottom: 24px; right: 24px; width: 60px; height: 60px;
-    border-radius: 50%; background: {MAROON}; color: {WHITE}; display: flex;
-    align-items: center; justify-content: center; font-size: 28px;
-    box-shadow: 0 4px 16px rgba(128,0,32,.3); z-index: 9999;
-    text-decoration: none; transition: transform .2s, box-shadow .2s; cursor: pointer; border: none; }}
-.chat-fab:hover {{ transform: scale(1.1); box-shadow: 0 6px 24px rgba(128,0,32,.45); }}
-.chat-panel {{ position: fixed; bottom: 96px; right: 24px; width: 440px;
-    max-height: 520px; background: {WHITE}; border-radius: 16px;
-    box-shadow: 0 8px 40px rgba(0,0,0,.15); border: 1px solid {GRAY_100};
-    z-index: 9998; overflow: hidden; display: flex; flex-direction: column; }}
-.chat-header {{ background: {MAROON}; color: {WHITE}; padding: 14px 18px;
-    font-weight: 700; font-size: 1rem; display: flex; justify-content: space-between;
-    align-items: center; }}
-.chat-header small {{ font-weight: 400; font-size: .75rem; opacity: .7; }}
-.chat-body {{ flex: 1; overflow-y: auto; padding: 16px; max-height: 340px; }}
-.chat-msg {{ margin-bottom: 12px; line-height: 1.5; }}
-.chat-msg.user {{ text-align: right; }}
-.chat-msg.user .bubble {{ display: inline-block; background: {MAROON}; color: {WHITE};
-    padding: 8px 14px; border-radius: 14px 14px 2px 14px; max-width: 85%; text-align: left;
-    font-size: .9rem; }}
-.chat-msg.bot .bubble {{ display: inline-block; background: {GRAY_100}; color: {GRAY_900};
-    padding: 8px 14px; border-radius: 14px 14px 14px 2px; max-width: 85%; text-align: left;
-    font-size: .9rem; }}
-.chat-suggestions {{ padding: 8px 16px 4px; display: flex; flex-wrap: wrap; gap: 6px;
-    border-top: 1px solid {GRAY_100}; }}
-.chat-sugg-btn {{ background: none; border: 1px solid {GRAY_300}; border-radius: 20px;
-    padding: 4px 12px; font-size: .78rem; color: {GRAY_700}; cursor: pointer;
-    transition: all .15s; }}
-.chat-sugg-btn:hover {{ background: {MAROON}; color: {WHITE}; border-color: {MAROON}; }}
+/* ── Chatbot Section ── */
+.chat-section-header {{ background: {MAROON}; color: {WHITE}; padding: 14px 18px;
+    border-radius: 8px 8px 0 0; font-weight: 700; font-size: 1rem;
+    display: flex; justify-content: space-between; align-items: center; }}
+.chat-section-header small {{ font-weight: 400; font-size: .75rem; opacity: .7; }}
 </style>""", unsafe_allow_html=True)
 
 
@@ -209,8 +184,6 @@ def safe_val(series, col, fmt="{:.2f}", default="—"):
 # ── Chatbot Engine ────────────────────────────────────────────
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
-if 'chat_open' not in st.session_state:
-    st.session_state.chat_open = False
 
 TABLE_SCHEMAS = """Available tables (ONLY generate SELECT queries):
 1. PUBLIC_HEALTH_DB.FEATURES.COVID_FEATURES
@@ -1002,93 +975,67 @@ Every claim references specific numbers the user can verify in the dashboard:
     """)
 
 
-# ── Floating Chatbot ─────────────────────────────────────────
-# Toggle button (Streamlit widget — drives session state)
-chat_toggle_col = st.columns([10, 1])
-with chat_toggle_col[1]:
-    if st.button("💬" if not st.session_state.chat_open else "✕", key="chat_fab_btn"):
-        st.session_state.chat_open = not st.session_state.chat_open
+# ── Chatbot ───────────────────────────────────────────────────
+st.markdown("---")
+st.markdown(f"""
+<div class="chat-section-header">
+    <span>Ask Sentinel</span>
+    <small>{sel_country} | {cr.RISK_TIER}</small>
+</div>
+""", True)
+
+# Suggested quick questions
+sugg_questions = [
+    "Explain my country's risk score",
+    "What does the forecast predict?",
+    "What does Rt mean for me?",
+    "Any unusual patterns detected?",
+    "How is the world doing overall?",
+    "What should I do to stay safe?",
+]
+sugg_cols = st.columns(3)
+for i, sq in enumerate(sugg_questions):
+    if sugg_cols[i % 3].button(sq, key=f"chat_sq_{i}"):
+        st.session_state.chat_pending = sq
         st.rerun()
 
-# Floating bubble (pure CSS — visual only, the real toggle is the Streamlit button above)
-st.markdown(
-    '<div class="chat-fab" style="pointer-events:none;">'
-    f'{"✕" if st.session_state.chat_open else "💬"}</div>', True
-)
-
-if st.session_state.chat_open:
-    # Build message HTML
-    msgs_html = ""
-    for msg in st.session_state.chat_messages:
-        css_class = "user" if msg['role'] == 'user' else "bot"
-        msgs_html += f'<div class="chat-msg {css_class}"><div class="bubble">{msg["content"]}</div></div>'
-
-    if not st.session_state.chat_messages:
-        msgs_html = (
-            '<div class="chat-msg bot"><div class="bubble">'
-            f'👋 Hi! I\'m <b>Sentinel</b>, your COVID-19 data assistant. '
-            f'I can help you understand anything about COVID-19 data for <b>{sel_country}</b> '
-            f'or any other country in the dashboard. Ask me anything!'
-            '</div></div>'
+# Display chat history
+if not st.session_state.chat_messages:
+    with st.chat_message("assistant"):
+        st.markdown(
+            f"Hi! I'm **Sentinel**, your COVID-19 data assistant. "
+            f"I can help you understand anything about COVID-19 data for **{sel_country}** "
+            f"or any other country in the dashboard. Ask me anything!"
         )
+else:
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    # Render the floating panel
-    st.markdown(f"""
-    <div class="chat-panel">
-        <div class="chat-header">
-            <span>💬 Ask Sentinel</span>
-            <small>{sel_country} • {cr.RISK_TIER}</small>
-        </div>
-        <div class="chat-body" id="chat-body">{msgs_html}</div>
-    </div>
-    <script>var cb=document.getElementById('chat-body');if(cb)cb.scrollTop=cb.scrollHeight;</script>
-    """, True)
+# Chat input
+chat_input = st.chat_input("Ask me anything about COVID-19 data...")
 
-    # Suggested questions
-    st.markdown("---")
-    st.markdown("**Quick questions:**")
-    sugg_questions = [
-        "📊 Explain my country's risk score",
-        "📈 What does the forecast predict?",
-        "🔢 What does Rt mean for me?",
-        "⚠️ Any unusual patterns detected?",
-        "🌍 How is the world doing overall?",
-        "🛡️ What should I do to stay safe?",
-    ]
-    sugg_cols = st.columns(3)
-    for i, sq in enumerate(sugg_questions):
-        if sugg_cols[i % 3].button(sq, key=f"chat_sq_{i}"):
-            st.session_state.chat_pending = sq
-            st.rerun()
+# Process pending suggestion or typed input
+pending = st.session_state.pop("chat_pending", None)
+if chat_input:
+    pending = chat_input
 
-    # Chat input
-    chat_input = st.text_input(
-        "Ask me anything about COVID-19...",
-        key="chat_input_field",
-        label_visibility="collapsed",
-        placeholder="Type your question about COVID-19 data..."
-    )
-    send_col1, send_col2 = st.columns([5, 1])
-    with send_col2:
-        send_clicked = st.button("Send", key="chat_send_btn", type="primary")
-
-    # Process pending suggestion or typed input
-    pending = st.session_state.pop('chat_pending', None)
-    if send_clicked and chat_input:
-        pending = chat_input
-
-    if pending:
-        st.session_state.chat_messages.append({"role": "user", "content": pending})
-        with st.spinner("🔍 Looking up the data..."):
+if pending:
+    st.session_state.chat_messages.append({"role": "user", "content": pending})
+    with st.chat_message("user"):
+        st.markdown(pending)
+    with st.chat_message("assistant"):
+        with st.spinner("Looking up the data..."):
             response = chat_respond(pending, cr, sel_country, score_val)
-        st.session_state.chat_messages.append({"role": "assistant", "content": response})
-        st.rerun()
+        st.markdown(response)
+    st.session_state.chat_messages.append({"role": "assistant", "content": response})
+    st.rerun()
 
-    # Clear chat button
-    if st.session_state.chat_messages:
-        if st.button("🗑️ Clear chat", key="chat_clear"):
-            st.session_state.chat_messages = []
-            st.rerun()
+# Clear chat button
+if st.session_state.chat_messages:
+    if st.button("Clear chat", key="chat_clear"):
+        st.session_state.chat_messages = []
+        st.rerun()
 
 
 # ── Footer ───────────────────────────────────────────────────
