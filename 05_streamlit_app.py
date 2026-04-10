@@ -78,11 +78,6 @@ section[data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.15); }}
     padding: 3px 12px; border-radius: 4px; font-weight: 600; font-size: .85rem; }}
 .footer {{ text-align: center; color: {GRAY_500}; font-size: .8rem;
     padding: 1.5rem 0 .5rem 0; border-top: 1px solid {GRAY_100}; margin-top: 2rem; }}
-/* ── Chatbot Section ── */
-.chat-section-header {{ background: {MAROON}; color: {WHITE}; padding: 14px 18px;
-    border-radius: 8px 8px 0 0; font-weight: 700; font-size: 1rem;
-    display: flex; justify-content: space-between; align-items: center; }}
-.chat-section-header small {{ font-weight: 400; font-size: .75rem; opacity: .7; }}
 </style>""", unsafe_allow_html=True)
 
 
@@ -100,21 +95,6 @@ def load_all():
         if 'DATE' in df.columns:
             df['DATE'] = pd.to_datetime(df['DATE'])
 
-    # Narratives — may not exist yet
-    try:
-        narratives = query("SELECT * FROM PUBLIC_HEALTH_DB.ANALYTICS.CORTEX_NARRATIVES ORDER BY COUNTRY_REGION")
-    except Exception:
-        narratives = pd.DataFrame()
-    try:
-        anomaly_expl = query("SELECT * FROM PUBLIC_HEALTH_DB.ANALYTICS.ANOMALY_EXPLANATIONS ORDER BY COUNTRY_REGION, DATE")
-        if 'DATE' in anomaly_expl.columns:
-            anomaly_expl['DATE'] = pd.to_datetime(anomaly_expl['DATE'])
-    except Exception:
-        anomaly_expl = pd.DataFrame()
-    try:
-        global_triage = query("SELECT GLOBAL_BRIEF FROM PUBLIC_HEALTH_DB.ANALYTICS.GLOBAL_TRIAGE")
-    except Exception:
-        global_triage = pd.DataFrame()
     try:
         vaccinations = query("SELECT * FROM PUBLIC_HEALTH_DB.RAW.VACCINATIONS ORDER BY COUNTRY_REGION, DATE")
         if 'DATE' in vaccinations.columns and not vaccinations.empty:
@@ -125,17 +105,10 @@ def load_all():
         metrics_df = query("SELECT * FROM PUBLIC_HEALTH_DB.ML.FORECAST_METRICS")
     except Exception:
         metrics_df = pd.DataFrame()
-    try:
-        policy_sims = query("SELECT * FROM PUBLIC_HEALTH_DB.ANALYTICS.POLICY_SIMULATIONS ORDER BY COUNTRY_REGION")
-    except Exception:
-        policy_sims = pd.DataFrame()
 
     return {
         'risk': risk, 'features': features, 'hf': hf, 'forecast': forecast,
-        'anomalies': anomalies, 'narratives': narratives,
-        'anomaly_expl': anomaly_expl, 'global_triage': global_triage,
-        'vaccinations': vaccinations, 'metrics': metrics_df,
-        'policy_sims': policy_sims
+        'anomalies': anomalies, 'vaccinations': vaccinations, 'metrics': metrics_df
     }
 
 data = load_all()
@@ -144,12 +117,8 @@ features = data['features']
 hf = data['hf']
 forecast = data['forecast']
 anomalies = data['anomalies']
-narratives = data['narratives']
-anomaly_expl = data['anomaly_expl']
-global_triage = data['global_triage']
 vaccinations = data['vaccinations']
 metrics_df = data['metrics']
-policy_sims = data['policy_sims']
 
 countries = risk['COUNTRY_REGION'].tolist()
 
@@ -210,76 +179,17 @@ TABLE_SCHEMAS = """Available tables (ONLY generate SELECT queries):
 6. PUBLIC_HEALTH_DB.ANALYTICS.VW_CORTEX_CONTEXT
    One row per country with ALL combined metrics, forecasts, risk, anomalies."""
 
-def build_screen_context(country_row, country_name, score):
-    """Build rich context describing what the user sees on the dashboard."""
-    rt_v = safe_val(country_row, 'RT_EFFECTIVE')
-    cases_v = safe_val(country_row, 'ROLLING_AVG_7D_CASES', '{:,.0f}')
-    phase_v = getattr(country_row, 'EPIDEMIC_PHASE', 'unknown')
-    trend_v = getattr(country_row, 'TREND_DIRECTION', 'unknown')
-    fcast_v = safe_val(country_row, 'FORECAST_TREND_PCT', '{:.1f}')
-    cfr_v = safe_val(country_row, 'CASE_FATALITY_RATE', '{:.2f}')
-    tier = country_row.RISK_TIER
-
-    return f"""=== DASHBOARD: Sentinel — COVID-19 Insights for Everyone ===
-The user is viewing a COVID-19 intelligence dashboard tracking {len(countries)} countries.
-Currently selected country: {country_name}
-
-SIDEBAR (always visible):
-- Country selector: {country_name} selected
-- Risk card: {tier} risk, score {score}/100
-
-HEADER: Shows "{country_name}" with a {tier} risk badge.
-
-TAB 1 — OVERVIEW (Global Risk):
-- KPI cards: {len(risk[risk.RISK_TIER == 'HIGH'])} HIGH risk countries, {len(risk[risk.RISK_TIER == 'MODERATE'])} MODERATE, {len(risk[risk.RISK_TIER == 'LOW'])} LOW
-- Average Rt across all countries: {risk.RT_EFFECTIVE.dropna().mean():.2f}
-- Average risk score: {risk.RISK_SCORE.mean():.0f}/100
-- Bar chart: risk scores for all countries (sorted highest to lowest)
-- Map: color-coded by risk tier (red=HIGH, amber=MODERATE, green=LOW)
-- Global risk table with all countries
-
-TAB 2 — EPIDEMIOLOGY (for {country_name}):
-- KPI cards: Rt={rt_v}, 7d avg cases={cases_v}, Phase={phase_v}, CFR={cfr_v}%
-- Chart: 7-day rolling average cases over time (Jan 2020 – Mar 2023)
-- Chart: Rt (reproduction number) over time with threshold line at 1.0
-- Chart: Daily deaths rolling average
-
-TAB 3 — FORECAST (for {country_name}):
-- ML forecast chart: 30-day prediction with 95% confidence interval (shaded band)
-- Historical actual cases vs predicted (model training on 2020–2022, validation 2022–2023)
-- Forecast trend: {fcast_v}% change over 30 days
-- Model performance table: MAPE and MAE per country
-
-TAB 4 — INTELLIGENCE (for {country_name}):
-- Quick Summary: AI-generated overview paragraph
-- What Do These Numbers Mean?: AI explains each metric with analogies
-- What's the Situation?: 4-paragraph deep-dive analysis
-- What Can I Do to Stay Safe?: 5 data-driven safety recommendations
-- Compare Countries: user selects multiple countries for AI comparison
-- What Could Happen Next?: 3 scenario simulations (status quo, new variant, intervention)
-- Anomaly Explanations: AI explains detected unusual data patterns
-
-TAB 5 — COMPARISON:
-- Side-by-side charts for multiple countries (case trends, Rt)
-- Comparison table with risk scores
-
-TAB 6 — ANOMALIES (for {country_name}):
-- Chart: actual vs expected cases with anomaly flags
-- List of detected anomalies with deviation percentages
-- Top anomalies table
-
-TAB 7 — METHODOLOGY:
-- Data sources, ML model details, risk scoring formula, AI grounding strategy
-
-CURRENT DATA FOR {country_name.upper()}:
-- Risk: {tier} ({score}/100)
-- Rt: {rt_v} (each infected person spreads to this many others)
-- 7-day avg cases: {cases_v}/day
-- Epidemic phase: {phase_v}
-- Trend direction: {trend_v}
-- Forecast trend: {fcast_v}% over next 30 days
-- Case fatality rate: {cfr_v}%
-- Risk breakdown: Rt={safe_val(country_row, 'F1_RT', '{:.0f}')}/25, Forecast={safe_val(country_row, 'F2_FORECAST', '{:.0f}')}/20, Accel={safe_val(country_row, 'F3_ACCEL', '{:.0f}')}/15, Doubling={safe_val(country_row, 'F4_DOUBLING', '{:.0f}')}/15, WoW={safe_val(country_row, 'F5_WOW', '{:.0f}')}/10, CFR={safe_val(country_row, 'F6_CFR', '{:.0f}')}/10, Volume={safe_val(country_row, 'F7_VOLUME', '{:.0f}')}/5, Anomaly={safe_val(country_row, 'F8_ANOMALY', '{:.0f}')}/5"""
+def build_data_context(country_row, country_name, score):
+    """Build concise data context for the selected country."""
+    return (
+        f"Selected country: {country_name}\n"
+        f"Risk tier: {country_row.RISK_TIER} (score {score}/100)\n"
+        f"Rt: {safe_val(country_row, 'RT_EFFECTIVE')} | "
+        f"7d avg cases: {safe_val(country_row, 'ROLLING_AVG_7D_CASES', '{:,.0f}')} | "
+        f"Forecast trend: {safe_val(country_row, 'FORECAST_TREND_PCT', '{:.1f}')}% | "
+        f"CFR: {safe_val(country_row, 'CASE_FATALITY_RATE', '{:.2f}')}%\n"
+        f"Total countries tracked: {len(countries)}"
+    )
 
 
 def extract_sql(response_text):
@@ -302,7 +212,7 @@ def extract_sql(response_text):
 
 def chat_respond(user_message, country_row, country_name, score):
     """Process user message through 2-step Cortex pipeline."""
-    screen_ctx = build_screen_context(country_row, country_name, score)
+    data_ctx = build_data_context(country_row, country_name, score)
 
     # Build recent conversation history (last 6 messages)
     history = ""
@@ -311,19 +221,20 @@ def chat_respond(user_message, country_row, country_name, score):
         history += f"{role_label}: {msg['content']}\n"
 
     system = (
-        "You are Sentinel, a COVID-19 data assistant built into an epidemiological dashboard. "
-        "You are an expert analyst but you write for everyday people with no medical background.\n\n"
+        "You are Sentinel, a COVID-19 data assistant. "
+        "You are an expert analyst but you explain everything in simple, plain English for everyday people.\n\n"
         "STRICT RULES:\n"
-        "1. ONLY answer questions about COVID-19 data, epidemiology, public health, and what the dashboard shows.\n"
-        "2. If asked about ANYTHING else (weather, sports, coding, recipes, politics, etc.), politely say: "
+        "1. ONLY answer questions about COVID-19 data, epidemiology, and public health.\n"
+        "2. If asked about ANYTHING else, politely say: "
         "'I can only help with COVID-19 related questions. Try asking about case trends, risk levels, or forecasts!'\n"
         "3. NEVER generate INSERT, UPDATE, DELETE, DROP, or any modifying SQL.\n"
         "4. If you need to look up data, write a single SELECT query wrapped in ```sql ... ```\n"
-        "5. If you can answer from the screen context without a query, just answer directly.\n"
-        "6. Always cite specific numbers. Explain what they mean in simple terms.\n"
+        "5. If you can answer from the data context without a query, just answer directly.\n"
+        "6. Always cite specific numbers. Explain what they mean in simple terms — "
+        "use analogies and plain language so anyone can understand.\n"
         "7. Keep answers concise — under 150 words unless the user asks for detail.\n\n"
         f"{TABLE_SCHEMAS}\n\n"
-        f"CURRENT SCREEN CONTEXT:\n{screen_ctx}\n\n"
+        f"CURRENT DATA CONTEXT:\n{data_ctx}\n\n"
         f"CONVERSATION HISTORY:\n{history}\n"
     )
 
@@ -428,7 +339,7 @@ with c2:
 
 
 # ── Tabs ─────────────────────────────────────────────────────
-tabs = st.tabs(["Overview", "Epidemiology", "Forecast", "Intelligence",
+tabs = st.tabs(["Overview", "Epidemiology", "Forecast", "Chat",
                 "Comparison", "Anomalies", "Methodology"])
 
 
@@ -687,131 +598,69 @@ with tabs[2]:
             st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
 
-# ═══════════ TAB 4: INTELLIGENCE ═════════════════════════════
+# ═══════════ TAB 4: CHAT ═════════════════════════════════════
 with tabs[3]:
-    st.markdown(f'<div class="sec-hdr">COVID-19 Insights — {sel_country}</div>', True)
-
-    # ── 1. Global Situation ──
-    if not global_triage.empty:
-        with st.expander("🌍 What’s Happening Around the World", expanded=False):
-            st.markdown(str(global_triage.iloc[0].GLOBAL_BRIEF))
-
-    # Get country narrative row
-    narr_row = None
-    if not narratives.empty:
-        narr = narratives[narratives.COUNTRY_REGION == sel_country]
-        if not narr.empty:
-            narr_row = narr.iloc[0]
-
-    if narr_row is not None:
-        st.markdown(f'{tier_badge(narr_row.RISK_TIER)} &nbsp; Score: {int(narr_row.RISK_SCORE)}/100', True)
-
-        # ── 2. Executive Summary ──
-        if hasattr(narr_row, 'EXECUTIVE_BRIEF') and pd.notna(narr_row.EXECUTIVE_BRIEF):
-            with st.expander("📋 Quick Summary", expanded=True):
-                st.markdown(str(narr_row.EXECUTIVE_BRIEF))
-
-        # ── 3. What Do These Numbers Mean? ──
-        if hasattr(narr_row, 'METRIC_EXPLAINER') and pd.notna(narr_row.METRIC_EXPLAINER):
-            with st.expander("🔢 What Do These Numbers Mean?", expanded=False):
-                st.markdown(str(narr_row.METRIC_EXPLAINER))
-
-        # ── 4. Situation Report ──
-        if hasattr(narr_row, 'SITUATION_SUMMARY') and pd.notna(narr_row.SITUATION_SUMMARY):
-            with st.expander("📖 What’s the Situation?", expanded=False):
-                st.markdown(str(narr_row.SITUATION_SUMMARY))
-
-        # ── 5. Preventive Measures ──
-        if hasattr(narr_row, 'PREVENTIVE_MEASURES') and pd.notna(narr_row.PREVENTIVE_MEASURES):
-            with st.expander("🛡️ What Can I Do to Stay Safe?", expanded=False):
-                st.markdown(str(narr_row.PREVENTIVE_MEASURES))
-    else:
-        st.info("Cortex narratives not generated yet. Run 04_risk_and_cortex.sql.")
-
-    # ── 6. Compare Countries ──
-    st.markdown('<div class="sub-hdr">⚖️ Compare Countries</div>', True)
-    compare_countries = st.multiselect(
-        "Select countries to compare",
-        countries,
-        default=[],
-        max_selections=4,
-        key="intel_compare"
+    st.markdown(f'<div class="sec-hdr">Ask Sentinel — {sel_country}</div>', True)
+    st.caption(
+        f"Ask any COVID-19 question. Sentinel queries the database and explains the numbers "
+        f"in simple English. Currently viewing **{sel_country}** ({cr.RISK_TIER} risk, score {score_val}/100)."
     )
 
-    if len(compare_countries) >= 2 and st.button("🔍 Generate Comparison", key="compare_btn"):
-        # Build context for each selected country from VW_CORTEX_CONTEXT
-        country_data_parts = []
-        for cc in compare_countries:
-            cc_risk = risk[risk.COUNTRY_REGION == cc]
-            if cc_risk.empty:
-                continue
-            ccr = cc_risk.iloc[0]
-            country_data_parts.append(
-                f"{cc}: Rt={safe_val(ccr, 'RT_EFFECTIVE')}, "
-                f"7d avg={safe_val(ccr, 'ROLLING_AVG_7D_CASES', '{:,.0f}')}, "
-                f"Phase={getattr(ccr, 'EPIDEMIC_PHASE', '—')}, "
-                f"Risk={getattr(ccr, 'RISK_TIER', '—')} ({safe_val(ccr, 'RISK_SCORE', '{:.0f}')}/100), "
-                f"Forecast trend={safe_val(ccr, 'FORECAST_TREND_PCT', '{:.1f}')}%"
+    # Suggested quick questions
+    sugg_questions = [
+        "Explain my country’s risk score",
+        "What does the forecast predict?",
+        "What does Rt mean for me?",
+        "Any unusual patterns detected?",
+        "How is the world doing overall?",
+        "What should I do to stay safe?",
+    ]
+    sugg_cols = st.columns(3)
+    for i, sq in enumerate(sugg_questions):
+        if sugg_cols[i % 3].button(sq, key=f"chat_sq_{i}"):
+            st.session_state.chat_pending = sq
+            st.rerun()
+
+    st.markdown("---")
+
+    # Display chat history
+    if not st.session_state.chat_messages:
+        with st.chat_message("assistant"):
+            st.markdown(
+                f"Hi! I’m **Sentinel**, your COVID-19 data assistant. "
+                f"I can answer questions about case trends, risk levels, forecasts, "
+                f"and anomalies for **{sel_country}** or any other country. "
+                f"Ask me anything and I’ll explain the numbers in plain English!"
             )
+    else:
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-        countries_str = " | ".join(country_data_parts)
-        prompt = f"""You are a senior epidemiologist comparing COVID-19 situations across countries.
-Your audience is regular people with no medical background. Do expert-level analysis but explain everything simply.
+    # Chat input
+    chat_input = st.chat_input("Ask me anything about COVID-19 data...")
 
-Data:
-{countries_str}
+    # Process pending suggestion or typed input
+    pending = st.session_state.pop("chat_pending", None)
+    if chat_input:
+        pending = chat_input
 
-Write a structured comparison covering:
-1. Which country is dealing with the toughest situation and why (cite the numbers)
-2. How the epidemic trajectories differ across these countries
-3. What people in each country can learn from the others
-4. One practical takeaway for each country
+    if pending:
+        st.session_state.chat_messages.append({"role": "user", "content": pending})
+        with st.chat_message("user"):
+            st.markdown(pending)
+        with st.chat_message("assistant"):
+            with st.spinner("Looking up the data..."):
+                response = chat_respond(pending, cr, sel_country, score_val)
+            st.markdown(response)
+        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+        st.rerun()
 
-Reference the specific numbers and explain what they mean. Analyze deeply, write simply.
-Under 400 words. No bullet points."""
-
-        try:
-            with st.spinner("Cortex is comparing..."):
-                result = session.sql(
-                    f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large', $${prompt}$$)"
-                ).collect()[0][0]
-            st.info(str(result))
-        except Exception as e:
-            st.error(f"Cortex comparison error: {e}")
-    elif len(compare_countries) == 1:
-        st.caption("Select at least 2 countries to compare.")
-
-    # ── 7. Policy Simulation ──
-    if not policy_sims.empty:
-        sim_row = policy_sims[policy_sims.COUNTRY_REGION == sel_country]
-        if not sim_row.empty:
-            with st.expander("🔮 What Could Happen Next? — Different Scenarios", expanded=False):
-                st.markdown(str(sim_row.iloc[0].SCENARIO_ANALYSIS))
-
-    # ── 8. Anomaly Explanations ──
-    if not anomaly_expl.empty:
-        anom_e = anomaly_expl[anomaly_expl.COUNTRY_REGION == sel_country]
-        if 'DEVIATION_PCT' in anom_e.columns:
-            anom_e = anom_e.sort_values('DEVIATION_PCT', ascending=False, key=abs)
-        if not anom_e.empty:
-            st.markdown('<div class="sub-hdr">🚨 Anomaly Explanations</div>', True)
-            for idx, ae in anom_e.iterrows():
-                date_str = str(ae.DATE.date()) if hasattr(ae.DATE, 'date') else str(ae.DATE)
-                with st.expander(f"{date_str} — {ae.ANOMALY_DIRECTION} ({ae.DEVIATION_PCT:+.0f}%)"):
-                    st.markdown(f"**Actual**: {ae.ACTUAL:,.0f} | **Expected**: {ae.EXPECTED:,.0f}")
-                    st.markdown(str(ae.EXPLANATION))
-
-
-    # ── All Country Summaries ──
-    if not narratives.empty:
-        col_check = 'EXECUTIVE_BRIEF' if 'EXECUTIVE_BRIEF' in narratives.columns else ('SITUATION_SUMMARY' if 'SITUATION_SUMMARY' in narratives.columns else None)
-        if col_check:
-            st.markdown('<div class="sub-hdr">All Country Summaries</div>', True)
-            for idx, n in narratives.iterrows():
-                brief_text = str(getattr(n, col_check, ''))
-                if brief_text and brief_text != 'nan':
-                    with st.expander(f"{n.COUNTRY_REGION} — {n.RISK_TIER} ({int(n.RISK_SCORE)}/100)"):
-                        st.markdown(brief_text)
+    # Clear chat button
+    if st.session_state.chat_messages:
+        if st.button("Clear chat", key="chat_clear"):
+            st.session_state.chat_messages = []
+            st.rerun()
 
 
 # ═══════════ TAB 5: COMPARISON ═══════════════════════════════
@@ -973,69 +822,6 @@ Every claim references specific numbers the user can verify in the dashboard:
 - **Reporting lag**: 7-day rolling averages correct for weekend effects
 - **High-income bias**: MAPE shown per country — wealthier nations have more consistent data
     """)
-
-
-# ── Chatbot ───────────────────────────────────────────────────
-st.markdown("---")
-st.markdown(f"""
-<div class="chat-section-header">
-    <span>Ask Sentinel</span>
-    <small>{sel_country} | {cr.RISK_TIER}</small>
-</div>
-""", True)
-
-# Suggested quick questions
-sugg_questions = [
-    "Explain my country's risk score",
-    "What does the forecast predict?",
-    "What does Rt mean for me?",
-    "Any unusual patterns detected?",
-    "How is the world doing overall?",
-    "What should I do to stay safe?",
-]
-sugg_cols = st.columns(3)
-for i, sq in enumerate(sugg_questions):
-    if sugg_cols[i % 3].button(sq, key=f"chat_sq_{i}"):
-        st.session_state.chat_pending = sq
-        st.rerun()
-
-# Display chat history
-if not st.session_state.chat_messages:
-    with st.chat_message("assistant"):
-        st.markdown(
-            f"Hi! I'm **Sentinel**, your COVID-19 data assistant. "
-            f"I can help you understand anything about COVID-19 data for **{sel_country}** "
-            f"or any other country in the dashboard. Ask me anything!"
-        )
-else:
-    for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-# Chat input
-chat_input = st.chat_input("Ask me anything about COVID-19 data...")
-
-# Process pending suggestion or typed input
-pending = st.session_state.pop("chat_pending", None)
-if chat_input:
-    pending = chat_input
-
-if pending:
-    st.session_state.chat_messages.append({"role": "user", "content": pending})
-    with st.chat_message("user"):
-        st.markdown(pending)
-    with st.chat_message("assistant"):
-        with st.spinner("Looking up the data..."):
-            response = chat_respond(pending, cr, sel_country, score_val)
-        st.markdown(response)
-    st.session_state.chat_messages.append({"role": "assistant", "content": response})
-    st.rerun()
-
-# Clear chat button
-if st.session_state.chat_messages:
-    if st.button("Clear chat", key="chat_clear"):
-        st.session_state.chat_messages = []
-        st.rerun()
 
 
 # ── Footer ───────────────────────────────────────────────────
